@@ -1,0 +1,6 @@
+path: /content/ml_model
+train: images/train
+val: images/train
+
+names:
+  0: shrimp
