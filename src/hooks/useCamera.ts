@@ -5,9 +5,21 @@ import {
   useEffect,
 } from "react";
 
+export interface CaptureResolution {
+  width: number;
+  height: number;
+  megapixels: number;
+  method: "ImageCapture" | "Video fallback";
+  sourceWidth?: number;
+  sourceHeight?: number;
+}
+
 export function useCamera() {
   const [cameraReady, setCameraReady] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const [captureResolution, setCaptureResolution] =
+    useState<CaptureResolution | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -15,56 +27,54 @@ export function useCamera() {
 
   const startingRef = useRef(false);
 
-  // ============================================================
-  // CAMERA TORCH
-  // ============================================================
-  const setCameraTorch = useCallback(async (enabled: boolean) => {
-    try {
-      const stream = streamRef.current;
 
-      if (!stream) {
-        return;
+
+  const setCameraTorch = useCallback(
+    async (enabled: boolean) => {
+      try {
+        const stream = streamRef.current;
+
+        if (!stream) {
+          return;
+        }
+
+        const track = stream.getVideoTracks()[0];
+
+        if (!track) {
+          return;
+        }
+
+        type TorchCapabilities = MediaTrackCapabilities & {
+          torch?: boolean;
+        };
+
+        type TorchConstraint = MediaTrackConstraintSet & {
+          torch?: boolean;
+        };
+
+        const capabilities =
+          track.getCapabilities() as TorchCapabilities;
+
+        if (capabilities.torch !== true) {
+          return;
+        }
+
+        await track.applyConstraints({
+          advanced: [
+            {
+              torch: enabled,
+            } as TorchConstraint,
+          ],
+        });
+      } catch (error) {
+        console.warn("Torch unavailable:", error);
       }
+    },
+    []
+  );
 
-      const track = stream.getVideoTracks()[0];
 
-      if (!track) {
-        return;
-      }
 
-      type TorchCapabilities = MediaTrackCapabilities & {
-        torch?: boolean;
-      };
-
-      type TorchConstraint = MediaTrackConstraintSet & {
-        torch?: boolean;
-      };
-
-      const capabilities =
-        track.getCapabilities() as TorchCapabilities;
-
-      // Some phones/browsers do not expose torch control.
-      // Capture should still work normally in that case.
-      if (capabilities.torch !== true) {
-        return;
-      }
-
-      await track.applyConstraints({
-        advanced: [
-          {
-            torch: enabled,
-          } as TorchConstraint,
-        ],
-      });
-    } catch (error) {
-      // Torch failure must never break image capture.
-      console.warn("Torch unavailable:", error);
-    }
-  }, []);
-
-  // ============================================================
-  // STOP CAMERA
-  // ============================================================
   const stopCamera = useCallback(() => {
     const stream = streamRef.current;
 
@@ -73,7 +83,7 @@ export function useCamera() {
         try {
           track.stop();
         } catch {
-          // Ignore already-stopped tracks.
+     
         }
       });
     }
@@ -89,16 +99,13 @@ export function useCamera() {
     setCameraReady(false);
   }, []);
 
-  // ============================================================
-  // START CAMERA
-  // ============================================================
+
+
   const startCamera = useCallback(async (): Promise<boolean> => {
-    // Already starting.
     if (startingRef.current) {
       return false;
     }
 
-    // Already running.
     if (streamRef.current) {
       setCameraReady(true);
       return true;
@@ -108,8 +115,8 @@ export function useCamera() {
 
     try {
       setErrorMessage(null);
+      setCaptureResolution(null);
 
-      // Browser support check.
       if (
         !navigator.mediaDevices ||
         !navigator.mediaDevices.getUserMedia
@@ -127,37 +134,77 @@ export function useCamera() {
         return false;
       }
 
-      // Request rear camera with reasonable mobile constraints.
+
+
       const stream =
         await navigator.mediaDevices.getUserMedia({
           video: {
             facingMode: {
               ideal: "environment",
             },
+
             width: {
-              ideal: 1920,
+              ideal: 3840,
             },
+
             height: {
-              ideal: 1080,
+              ideal: 2160,
             },
+
             frameRate: {
               ideal: 30,
-              max: 30,
             },
           },
+
           audio: false,
         });
 
       streamRef.current = stream;
 
+      const track = stream.getVideoTracks()[0];
+
+      if (track) {
+        console.log(
+          "========================================"
+        );
+
+        console.log(
+          "[DIZIAQUA] CAMERA DEVICE:",
+          track.label
+        );
+
+        console.log(
+          "[DIZIAQUA] ACTUAL VIDEO SETTINGS:",
+          track.getSettings()
+        );
+
+        try {
+          console.log(
+            "[DIZIAQUA] CAMERA CAPABILITIES:",
+            track.getCapabilities()
+          );
+        } catch {
+          console.warn(
+            "[DIZIAQUA] Camera capabilities unavailable."
+          );
+        }
+
+        console.log(
+          "========================================"
+        );
+      }
+
       video.srcObject = stream;
       video.playsInline = true;
       video.muted = true;
 
-      // Wait until camera metadata is ready.
       await new Promise<void>((resolve, reject) => {
         if (!video) {
-          reject(new Error("Camera video element unavailable."));
+          reject(
+            new Error(
+              "Camera video element unavailable."
+            )
+          );
           return;
         }
 
@@ -174,9 +221,9 @@ export function useCamera() {
           resolve();
         };
 
-        video.onloadedmetadata = handleLoadedMetadata;
+        video.onloadedmetadata =
+          handleLoadedMetadata;
 
-        // Safety timeout so the app does not wait forever.
         setTimeout(() => {
           if (
             video.readyState >=
@@ -194,7 +241,10 @@ export function useCamera() {
 
       return true;
     } catch (error) {
-      console.error("Camera start failed:", error);
+      console.error(
+        "Camera start failed:",
+        error
+      );
 
       stopCamera();
 
@@ -208,13 +258,17 @@ export function useCamera() {
         } else if (error.name === "NotFoundError") {
           message =
             "No camera was found on this device.";
-        } else if (error.name === "NotReadableError") {
+        } else if (
+          error.name === "NotReadableError"
+        ) {
           message =
             "The camera is currently being used by another app.";
         } else if (error.name === "SecurityError") {
           message =
             "Camera access is blocked. Please use the website over HTTPS.";
-        } else if (error.name === "OverconstrainedError") {
+        } else if (
+          error.name === "OverconstrainedError"
+        ) {
           message =
             "The camera does not support the requested settings.";
         }
@@ -228,133 +282,433 @@ export function useCamera() {
     }
   }, [stopCamera]);
 
-  // ============================================================
-  // CAPTURE FRAME
-  // ============================================================
-  const captureFrame = async (): Promise<{
-    blob: Blob;
-    url: string;
-  } | null> => {
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
 
-    if (!video || !canvas || !cameraReady) {
-      return null;
-    }
 
-    if (
-      video.readyState <
-        HTMLMediaElement.HAVE_CURRENT_DATA ||
-      video.videoWidth === 0 ||
-      video.videoHeight === 0
-    ) {
-      return null;
-    }
+  const processStillPhoto = useCallback(
+    async (
+      photoBlob: Blob,
+      method: "ImageCapture" | "Video fallback"
+    ): Promise<{
+      blob: Blob;
+      url: string;
+      resolution: CaptureResolution;
+    } | null> => {
+      try {
+        const bitmap =
+          await createImageBitmap(photoBlob);
 
-    try {
-      // --------------------------------------------------------
-      // TURN TORCH ON
-      // --------------------------------------------------------
-      await setCameraTorch(true);
+        const sourceWidth = bitmap.width;
+        const sourceHeight = bitmap.height;
 
-      // Give the phone a moment to activate the torch.
-      await new Promise((resolve) => {
-        setTimeout(resolve, 150);
-      });
+        if (
+          sourceWidth === 0 ||
+          sourceHeight === 0
+        ) {
+          bitmap.close();
+          return null;
+        }
 
-      // --------------------------------------------------------
-      // CREATE SQUARE CROP
-      // --------------------------------------------------------
-      const sourceSize = Math.min(
-        video.videoWidth,
-        video.videoHeight
-      );
+        // Center square crop.
+        const sourceSize = Math.min(
+          sourceWidth,
+          sourceHeight
+        );
 
-      const sourceStartX =
-        (video.videoWidth - sourceSize) / 2;
+        const sourceStartX =
+          (sourceWidth - sourceSize) / 2;
 
-      const sourceStartY =
-        (video.videoHeight - sourceSize) / 2;
+        const sourceStartY =
+          (sourceHeight - sourceSize) / 2;
 
-      canvas.width = sourceSize;
-      canvas.height = sourceSize;
+        const canvas = canvasRef.current;
 
-      const ctx = canvas.getContext("2d");
+        if (!canvas) {
+          bitmap.close();
+          return null;
+        }
 
-      if (!ctx) {
+
+        canvas.width = sourceSize;
+        canvas.height = sourceSize;
+
+        const ctx = canvas.getContext("2d");
+
+        if (!ctx) {
+          bitmap.close();
+          return null;
+        }
+
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high";
+
+        ctx.clearRect(
+          0,
+          0,
+          sourceSize,
+          sourceSize
+        );
+
+        ctx.drawImage(
+          bitmap,
+          sourceStartX,
+          sourceStartY,
+          sourceSize,
+          sourceSize,
+          0,
+          0,
+          sourceSize,
+          sourceSize
+        );
+
+        bitmap.close();
+
+        // PNG is lossless.
+        // This preserves the pixels after the crop.
+        const finalBlob =
+          await new Promise<Blob | null>(
+            (resolve) => {
+              canvas.toBlob(
+                (blob) => {
+                  resolve(blob);
+                },
+                "image/png"
+              );
+            }
+          );
+
+        if (!finalBlob) {
+          return null;
+        }
+
+        const megapixels =
+          (sourceSize * sourceSize) /
+          1_000_000;
+
+        const resolution: CaptureResolution = {
+          width: sourceSize,
+          height: sourceSize,
+          megapixels,
+          method,
+          sourceWidth,
+          sourceHeight,
+        };
+
+        console.log(
+          "========================================"
+        );
+
+        console.log(
+          "[DIZIAQUA] CAPTURE METHOD:",
+          method
+        );
+
+        console.log(
+          "[DIZIAQUA] ORIGINAL PHOTO:",
+          `${sourceWidth} × ${sourceHeight}`
+        );
+
+        console.log(
+          "[DIZIAQUA] FINAL MODEL IMAGE:",
+          `${sourceSize} × ${sourceSize}`
+        );
+
+        console.log(
+          "[DIZIAQUA] FINAL MEGAPIXELS:",
+          megapixels.toFixed(2),
+          "MP"
+        );
+
+        console.log(
+          "========================================"
+        );
+
+        return {
+          blob: finalBlob,
+          url: URL.createObjectURL(
+            finalBlob
+          ),
+          resolution,
+        };
+      } catch (error) {
+        console.error(
+          "Still photo processing failed:",
+          error
+        );
+
+        return null;
+      }
+    },
+    []
+  );
+
+
+
+  const captureFrame = useCallback(
+    async (): Promise<{
+      blob: Blob;
+      url: string;
+    } | null> => {
+      const stream = streamRef.current;
+
+      if (!stream || !cameraReady) {
         return null;
       }
 
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = "high";
+      const track =
+        stream.getVideoTracks()[0];
 
-      ctx.clearRect(
-        0,
-        0,
-        sourceSize,
-        sourceSize
-      );
+      if (!track) {
+        return null;
+      }
 
-      // --------------------------------------------------------
-      // CAPTURE IMAGE
-      // --------------------------------------------------------
-      ctx.drawImage(
-        video,
-        sourceStartX,
-        sourceStartY,
-        sourceSize,
-        sourceSize,
-        0,
-        0,
-        sourceSize,
-        sourceSize
-      );
+      try {
 
-      // --------------------------------------------------------
-      // TURN TORCH OFF
-      // --------------------------------------------------------
-      await setCameraTorch(false);
 
-      // --------------------------------------------------------
-      // CREATE PNG BLOB
-      // --------------------------------------------------------
-      return await new Promise((resolve) => {
-        canvas.toBlob(
-          (blob) => {
-            if (!blob) {
-              resolve(null);
-              return;
+        await setCameraTorch(true);
+
+        await new Promise((resolve) => {
+          setTimeout(resolve, 150);
+        });
+
+
+
+        if (
+          "ImageCapture" in window
+        ) {
+          try {
+            const ImageCaptureClass =
+              window.ImageCapture;
+
+            if (ImageCaptureClass) {
+              const imageCapture =
+                new ImageCaptureClass(track);
+
+              const capabilities =
+                await imageCapture.getPhotoCapabilities();
+
+              console.log(
+                "[DIZIAQUA] PHOTO CAPABILITIES:",
+                capabilities
+              );
+
+              const maxWidth =
+                capabilities.imageWidth?.max;
+
+              const maxHeight =
+                capabilities.imageHeight?.max;
+
+              console.log(
+                "[DIZIAQUA] MAX PHOTO:",
+                `${maxWidth} × ${maxHeight}`
+              );
+
+              if (
+                maxWidth &&
+                maxHeight
+              ) {
+                const photo =
+                  await imageCapture.takePhoto({
+                    imageWidth: maxWidth,
+                    imageHeight: maxHeight,
+                  });
+
+                console.log(
+                  "[DIZIAQUA] NATIVE PHOTO BLOB:",
+                  photo.type,
+                  photo.size,
+                  "bytes"
+                );
+
+                const processed =
+                  await processStillPhoto(
+                    photo,
+                    "ImageCapture"
+                  );
+
+                if (processed) {
+                  setCaptureResolution(
+                    processed.resolution
+                  );
+
+                  return {
+                    blob: processed.blob,
+                    url: processed.url,
+                  };
+                }
+              }
             }
+          } catch (error) {
+            console.warn(
+              "[DIZIAQUA] ImageCapture failed. Falling back to video frame.",
+              error
+            );
+          }
+        }
 
-            resolve({
-              blob,
-              url: URL.createObjectURL(blob),
-            });
-          },
-          "image/png"
+
+        console.log(
+          "[DIZIAQUA] USING VIDEO/CANVAS FALLBACK"
         );
-      });
-    } catch (error) {
-      console.error("Image capture failed:", error);
-      return null;
-    } finally {
-      // Always make sure the torch is off after capture.
-      await setCameraTorch(false);
-    }
-  };
 
-  // ============================================================
-  // CLEANUP WHEN COMPONENT IS DESTROYED
-  // ============================================================
+        const video = videoRef.current;
+        const canvas = canvasRef.current;
+
+        if (
+          !video ||
+          !canvas ||
+          video.readyState <
+            HTMLMediaElement.HAVE_CURRENT_DATA ||
+          video.videoWidth === 0 ||
+          video.videoHeight === 0
+        ) {
+          return null;
+        }
+
+        const sourceWidth =
+          video.videoWidth;
+
+        const sourceHeight =
+          video.videoHeight;
+
+        const sourceSize =
+          Math.min(
+            sourceWidth,
+            sourceHeight
+          );
+
+        const sourceStartX =
+          (sourceWidth - sourceSize) / 2;
+
+        const sourceStartY =
+          (sourceHeight - sourceSize) / 2;
+
+        canvas.width = sourceSize;
+        canvas.height = sourceSize;
+
+        const ctx =
+          canvas.getContext("2d");
+
+        if (!ctx) {
+          return null;
+        }
+
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality =
+          "high";
+
+        ctx.clearRect(
+          0,
+          0,
+          sourceSize,
+          sourceSize
+        );
+
+        ctx.drawImage(
+          video,
+          sourceStartX,
+          sourceStartY,
+          sourceSize,
+          sourceSize,
+          0,
+          0,
+          sourceSize,
+          sourceSize
+        );
+
+        const blob =
+          await new Promise<Blob | null>(
+            (resolve) => {
+              canvas.toBlob(
+                (result) => {
+                  resolve(result);
+                },
+                "image/png"
+              );
+            }
+          );
+
+        if (!blob) {
+          return null;
+        }
+
+        const megapixels =
+          (sourceSize * sourceSize) /
+          1_000_000;
+
+        const resolution: CaptureResolution =
+          {
+            width: sourceSize,
+            height: sourceSize,
+            megapixels,
+            method: "Video fallback",
+            sourceWidth,
+            sourceHeight,
+          };
+
+        setCaptureResolution(
+          resolution
+        );
+
+        console.log(
+          "========================================"
+        );
+
+        console.log(
+          "[DIZIAQUA] FALLBACK VIDEO:"
+        );
+
+        console.log(
+          "[DIZIAQUA] VIDEO:",
+          `${sourceWidth} × ${sourceHeight}`
+        );
+
+        console.log(
+          "[DIZIAQUA] FINAL:",
+          `${sourceSize} × ${sourceSize}`
+        );
+
+        console.log(
+          "[DIZIAQUA] FINAL MP:",
+          megapixels.toFixed(2)
+        );
+
+        console.log(
+          "========================================"
+        );
+
+        return {
+          blob,
+          url: URL.createObjectURL(
+            blob
+          ),
+        };
+      } catch (error) {
+        console.error(
+          "Image capture failed:",
+          error
+        );
+
+        return null;
+      } finally {
+        // Always turn torch off.
+        await setCameraTorch(false);
+      }
+    },
+    [
+      cameraReady,
+      processStillPhoto,
+      setCameraTorch,
+    ]
+  );
+
+
   useEffect(() => {
     return () => {
       stopCamera();
     };
   }, [stopCamera]);
 
-  // ============================================================
-  // RETURN
-  // ============================================================
+
   return {
     videoRef,
     canvasRef,
@@ -364,5 +718,6 @@ export function useCamera() {
     startCamera,
     stopCamera,
     captureFrame,
+    captureResolution,
   };
 }

@@ -8,16 +8,17 @@ import StatusDisplay from "@/components/StatusDisplay";
 import CaptureControls from "@/components/CaptureControls";
 
 export default function Home() {
-  const {
-    videoRef,
-    canvasRef,
-    cameraReady,
-    errorMessage,
-    setErrorMessage,
-    startCamera,
-    stopCamera,
-    captureFrame,
-  } = useCamera();
+const {
+  videoRef,
+  canvasRef,
+  cameraReady,
+  errorMessage,
+  setErrorMessage,
+  startCamera,
+  stopCamera,
+  captureFrame,
+  captureResolution,
+} = useCamera();
 
   const [isCaptured, setIsCaptured] = useState(false);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
@@ -39,21 +40,7 @@ export default function Home() {
     }
   }, [isCaptured, startCamera]);
 
-  // ============================================================
-  // MOBILE APP / BROWSER LIFECYCLE
-  //
-  // Leaving the app:
-  //     stop camera
-  //
-  // Coming back:
-  //     restart camera only if no image is currently captured
-  //
-  // This does NOT trigger:
-  //     - torch
-  //     - sound
-  //     - capture
-  //     - white flash
-  // ============================================================
+
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === "hidden") {
@@ -101,9 +88,6 @@ export default function Home() {
     };
   }, [isCaptured, startCamera, stopCamera]);
 
-  // ============================================================
-  // CAMERA CLICK SOUND
-  // ============================================================
   useEffect(() => {
     const audio = new Audio("/sounds/camera-click.mp3");
     audio.preload = "auto";
@@ -116,9 +100,7 @@ export default function Home() {
     };
   }, []);
 
-  // ============================================================
-  // CLEAN UP OBJECT URL
-  // ============================================================
+
   useEffect(() => {
     return () => {
       if (capturedImage) {
@@ -127,9 +109,6 @@ export default function Home() {
     };
   }, [capturedImage]);
 
-  // ============================================================
-  // CAPTURE
-  // ============================================================
   const handleCapture = async () => {
     const result = await captureFrame();
 
@@ -137,7 +116,7 @@ export default function Home() {
       return;
     }
 
-    // Play camera click after successful capture.
+
     const audio = cameraClickRef.current;
 
     if (audio) {
@@ -145,8 +124,7 @@ export default function Home() {
         audio.currentTime = 0;
         await audio.play();
       } catch {
-        // Ignore sound errors.
-        // Capture itself must continue normally.
+
       }
     }
 
@@ -164,9 +142,7 @@ export default function Home() {
     stopCamera();
   };
 
-  // ============================================================
-  // UPLOAD EXISTING IMAGE
-  // ============================================================
+
   const handleUpload = (
     event: React.ChangeEvent<HTMLInputElement>
   ) => {
@@ -280,9 +256,7 @@ export default function Home() {
     image.src = imageUrl;
   };
 
-  // ============================================================
-  // RECAPTURE
-  // ============================================================
+
   const handleRecapture = () => {
     if (capturedImage) {
       URL.revokeObjectURL(capturedImage);
@@ -296,9 +270,6 @@ export default function Home() {
     setIsCaptured(false);
   };
 
-  // ============================================================
-  // SUBMIT TO S3 + LAMBDA
-  // ============================================================
   const handleSubmit = async () => {
     if (!capturedBlob) {
       setErrorMessage("No captured image available.");
@@ -311,9 +282,6 @@ export default function Home() {
       setSavedFileName(null);
       setErrorMessage(null);
 
-      // --------------------------------------------------------
-      // STEP 1: Get secure S3 upload URL
-      // --------------------------------------------------------
       const urlRes = await fetch(
         "/api/upload-url",
         {
@@ -333,9 +301,6 @@ export default function Home() {
         bucket,
       } = await urlRes.json();
 
-      // --------------------------------------------------------
-      // STEP 2: Upload original PNG directly to S3
-      // --------------------------------------------------------
       const uploadRes = await fetch(
         uploadUrl,
         {
@@ -353,9 +318,6 @@ export default function Home() {
         );
       }
 
-      // --------------------------------------------------------
-      // STEP 3: Tell Next.js which S3 object Lambda should process
-      // --------------------------------------------------------
       const processRes = await fetch(
         "/api/capture",
         {
@@ -379,9 +341,7 @@ export default function Home() {
         );
       }
 
-      // --------------------------------------------------------
-      // STEP 4: Display result
-      // --------------------------------------------------------
+
       setSavedFileName(
         typeof result.fileName === "string"
           ? result.fileName
@@ -402,9 +362,7 @@ export default function Home() {
     }
   };
 
-  // ============================================================
-  // UI
-  // ============================================================
+
   return (
     <>
       <canvas
@@ -413,7 +371,7 @@ export default function Home() {
       />
 
       <div className="w-full h-[calc(100dvh-60px)] overflow-hidden flex flex-col items-center justify-between pt-6 pb-15 select-none bg-background">
-        {/* Instructions */}
+
         <div>
           <Image
             src="/images/inst.png"
@@ -424,22 +382,22 @@ export default function Home() {
           />
         </div>
 
-        {/* Camera / Captured Image */}
+
         <Viewfinder
           isCaptured={isCaptured}
           capturedImage={capturedImage}
           videoRef={videoRef}
         />
 
-        {/* Status */}
         <StatusDisplay
           isProcessing={isProcessing}
           count={count}
           savedFileName={savedFileName}
           errorMessage={errorMessage}
+          captureResolution={captureResolution}
         />
 
-        {/* Controls */}
+
         <CaptureControls
           isCaptured={isCaptured}
           cameraReady={cameraReady}
