@@ -1,28 +1,50 @@
 import { NextResponse } from "next/server";
-import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
-import { SageMakerRuntimeClient, InvokeEndpointAsyncCommand } from "@aws-sdk/client-sagemaker-runtime";
+
+import {
+  S3Client,
+  GetObjectCommand,
+} from "@aws-sdk/client-s3";
+
+import {
+  SageMakerRuntimeClient,
+  InvokeEndpointCommand,
+} from "@aws-sdk/client-sagemaker-runtime";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
+const REGION =
+  process.env.DIZIAQUA_REGION || "ap-south-1";
+
+const DEFAULT_BUCKET =
+  process.env.DIZIAQUA_S3_BUCKET ||
+  "diziaqua-images-320698389233";
+
+const credentials = {
+  accessKeyId:
+    process.env.DIZIAQUA_ACCESS_KEY_ID || "",
+
+  secretAccessKey:
+    process.env.DIZIAQUA_SECRET_ACCESS_KEY || "",
+};
+
 const s3Client = new S3Client({
-  region: process.env.DIZIAQUA_REGION || "ap-south-1",
-  credentials: {
-    accessKeyId: process.env.DIZIAQUA_ACCESS_KEY_ID || "",
-    secretAccessKey: process.env.DIZIAQUA_SECRET_ACCESS_KEY || "",
-  },
+  region: REGION,
+  credentials,
 });
 
 const smClient = new SageMakerRuntimeClient({
-  region: process.env.DIZIAQUA_REGION || "ap-south-1",
-  credentials: {
-    accessKeyId: process.env.DIZIAQUA_ACCESS_KEY_ID || "",
-    secretAccessKey: process.env.DIZIAQUA_SECRET_ACCESS_KEY || "",
-  },
+  region: REGION,
+  credentials,
 });
 
-const ENDPOINT_NAME = "shrimp-async-endpoint";
+/*
+ * THIS IS THE IMPORTANT CHANGE.
+ *
+ * Your actual SageMaker Serverless endpoint:
+ */
+const ENDPOINT_NAME = "shrimp-yolo-endpoint";
 
 type PredictionInput = {
   bucket: string;
@@ -36,147 +58,340 @@ type BoundingBoxPrediction = {
 };
 
 type SageMakerPredictionResponse = {
-  status: "success" | "error";
-  count?: number;
-  input?: PredictionInput;
-  results?: BoundingBoxPrediction[];
+  shrimp_count?: number;
+  predictions?: BoundingBoxPrediction[];
   error?: string;
 };
 
-function logStep(step: string, data?: unknown) {
-  console.log(`[DIZIAQUA] ${new Date().toISOString()} - ${step}`, data ?? "");
+function logStep(
+  step: string,
+  data?: unknown
+) {
+  console.log(
+    `[DIZIAQUA] ${new Date().toISOString()} - ${step}`,
+    data ?? ""
+  );
 }
 
 async function callSageMakerCounter(
   bucket: string,
   key: string
 ): Promise<SageMakerPredictionResponse> {
-  logStep("STARTING SAGEMAKER INVOCATION PROCESS");
 
-  const getImg = await s3Client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
-  const imgBytes = await getImg.Body?.transformToByteArray();
-  
-  if (!imgBytes) throw new Error("Empty file received from S3");
-  const base64Image = Buffer.from(imgBytes).toString("base64");
-
-  const payloadKey = `async-inputs/payload-${Date.now()}.json`;
-  logStep("2. Uploading Base64 JSON payload for SageMaker", { payloadKey });
-  
-  await s3Client.send(new PutObjectCommand({
-    Bucket: bucket,
-    Key: payloadKey,
-    Body: JSON.stringify({ image: base64Image }),
-    ContentType: "application/json"
-  }));
-
-  logStep("3. Invoking SageMaker Async Endpoint");
-  const invokeRes = await smClient.send(new InvokeEndpointAsyncCommand({
-    EndpointName: ENDPOINT_NAME,
-    InputLocation: `s3://${bucket}/${payloadKey}`,
-  }));
-
-  const outputLocation = invokeRes.OutputLocation; 
-  if (!outputLocation) throw new Error("SageMaker did not return an OutputLocation");
-  
-  const outputKey = outputLocation.replace(`s3://${bucket}/`, "");
-  logStep("  Waiting for result at", outputLocation);
-
-  let resultData = null;
-  const maxRetries = 35;
-  
-  for (let i = 0; i < maxRetries; i++) {
-    await new Promise(resolve => setTimeout(resolve, 1500)); 
-    try {
-      const getOut = await s3Client.send(new GetObjectCommand({ Bucket: bucket, Key: outputKey }));
-      const outStr = await getOut.Body?.transformToString();
-      if (outStr) {
-        resultData = JSON.parse(outStr);
-        break; 
-      }
-    } catch (err: unknown) {
-      const e = err as Error;
-      if (e.name !== "NoSuchKey" && e.name !== "NotFound") {
-        logStep("POLLING ERROR", e);
-        throw e;
-      }
+  logStep(
+    "STARTING SAGEMAKER SERVERLESS INVOCATION",
+    {
+      endpoint: ENDPOINT_NAME,
+      bucket,
+      key,
     }
+  );
+
+  // ---------------------------------------------
+  // 1. Download image from S3
+  // ---------------------------------------------
+
+  const getImg = await s3Client.send(
+    new GetObjectCommand({
+      Bucket: bucket,
+      Key: key,
+    })
+  );
+
+  const imgBytes =
+    await getImg.Body?.transformToByteArray();
+
+  if (!imgBytes || imgBytes.length === 0) {
+    throw new Error(
+      "Empty file received from S3"
+    );
   }
 
-  if (!resultData) {
-    throw new Error("SageMaker inference timed out. The server might still be waking up (Cold Start).");
+  logStep(
+    "IMAGE DOWNLOADED FROM S3",
+    {
+      bytes: imgBytes.length,
+
+      mb:
+        imgBytes.length /
+        1024 /
+        1024,
+    }
+  );
+
+  // ---------------------------------------------
+  // 2. Convert image to Base64
+  // ---------------------------------------------
+
+  const base64Image =
+    Buffer.from(imgBytes).toString("base64");
+
+  /*
+   * Your inference.py expects:
+   *
+   * {
+   *   "image": "BASE64..."
+   * }
+   */
+
+  const payload = JSON.stringify({
+    image: base64Image,
+  });
+
+  const payloadBytes =
+    Buffer.byteLength(payload);
+
+  logStep(
+    "SAGEMAKER PAYLOAD CREATED",
+    {
+      payloadBytes,
+
+      payloadMB:
+        (
+          payloadBytes /
+          1024 /
+          1024
+        ).toFixed(2),
+    }
+  );
+
+  /*
+   * Serverless request payload must remain
+   * within SageMaker's payload limit.
+   */
+
+  if (
+    payloadBytes >
+    4 * 1024 * 1024
+  ) {
+    throw new Error(
+      "Image is too large for SageMaker Serverless. " +
+      "Resize/compress the image before inference."
+    );
   }
 
-  logStep("SAGEMAKER SUCCESS", { count: resultData.shrimp_count });
+  // ---------------------------------------------
+  // 3. SYNCHRONOUS invocation
+  // ---------------------------------------------
+  //
+  // OLD:
+  // InvokeEndpointAsyncCommand
+  //
+  // NEW:
+  // InvokeEndpointCommand
+  //
+  // ---------------------------------------------
 
-  return {
-    status: "success",
-    count: resultData.shrimp_count,
-    results: resultData.predictions,
-  };
+  logStep(
+    "CALLING SAGEMAKER ENDPOINT",
+    ENDPOINT_NAME
+  );
+
+  const response =
+    await smClient.send(
+      new InvokeEndpointCommand({
+        EndpointName:
+          ENDPOINT_NAME,
+
+        ContentType:
+          "application/json",
+
+        Accept:
+          "application/json",
+
+        Body:
+          Buffer.from(payload),
+      })
+    );
+
+  // ---------------------------------------------
+  // 4. Read response
+  // ---------------------------------------------
+
+  if (!response.Body) {
+    throw new Error(
+      "SageMaker returned an empty response"
+    );
+  }
+
+  const responseText =
+    Buffer
+      .from(response.Body)
+      .toString("utf-8");
+
+  logStep(
+    "SAGEMAKER RAW RESPONSE",
+    responseText
+  );
+
+  const result =
+    JSON.parse(
+      responseText
+    ) as SageMakerPredictionResponse;
+
+  if (result.error) {
+    throw new Error(
+      result.error
+    );
+  }
+
+  logStep(
+    "SAGEMAKER SUCCESS",
+    {
+      count:
+        result.shrimp_count,
+
+      predictions:
+        result.predictions?.length || 0,
+    }
+  );
+
+  return result;
 }
 
-export async function POST(request: Request) {
-  const requestStart = Date.now();
+export async function POST(
+  request: Request
+) {
 
-  logStep("========================================");
-  logStep("NEW PROCESSING REQUEST (VIA SAGEMAKER)");
+  const requestStart =
+    Date.now();
+
+  logStep(
+    "========================================"
+  );
+
+  logStep(
+    "NEW SHRIMP COUNT REQUEST"
+  );
 
   try {
-    const body = await request.json();
-    const { bucket, key } = body;
 
-    logStep("PAYLOAD RECEIVED", { bucket, key });
+    // -----------------------------------------
+    // 1. Read request body
+    // -----------------------------------------
 
-    if (!bucket || !key) {
+    const body =
+      await request.json();
+
+    const bucket =
+      body.bucket ||
+      DEFAULT_BUCKET;
+
+    const key =
+      body.key;
+
+    logStep(
+      "PAYLOAD RECEIVED",
+      {
+        bucket,
+        key,
+      }
+    );
+
+    if (!key) {
+
       return NextResponse.json(
-        { success: false, message: "Missing bucket or key in request." },
-        { status: 400 }
+        {
+          success: false,
+          message:
+            "Missing bucket or key.",
+        },
+        {
+          status: 400,
+        }
       );
     }
 
-    const smResult = await callSageMakerCounter(bucket, key);
-    const totalTime = Date.now() - requestStart;
+    // -----------------------------------------
+    // 2. Invoke SageMaker
+    // -----------------------------------------
 
-    logStep("REQUEST COMPLETE", {
-      totalTime: `${totalTime} ms`,
-      count: smResult.count,
-    });
-    logStep("========================================");
+    const smResult =
+      await callSageMakerCounter(
+        bucket,
+        key
+      );
+
+    const totalTime =
+      Date.now() -
+      requestStart;
+
+    // -----------------------------------------
+    // 3. Return result to frontend
+    // -----------------------------------------
 
     return NextResponse.json(
       {
         success: true,
-        count: smResult.count,
-        fileName: key,
-        processingTimeMs: totalTime,
-        input: { bucket, key },
-        results: smResult.results || [],
+
+        count:
+          smResult.shrimp_count ?? 0,
+
+        fileName:
+          key,
+
+        processingTimeMs:
+          totalTime,
+
+        input:
+          {
+            bucket,
+            key,
+          },
+
+        results:
+          smResult.predictions || [],
       },
       {
         status: 200,
+
         headers: {
-          "Cache-Control": "no-store",
-          "Content-Type": "application/json",
+          "Cache-Control":
+            "no-store",
+
+          "Content-Type":
+            "application/json",
         },
       }
     );
-  } catch (error) {
-    const totalTime = Date.now() - requestStart;
-    const message = error instanceof Error ? error.message : String(error);
 
-    logStep("========================================");
-    logStep("REQUEST FAILED");
-    logStep("ERROR", message);
-    logStep("TOTAL TIME", `${totalTime} ms`);
-    logStep("========================================");
+  } catch (error) {
+
+    const totalTime =
+      Date.now() -
+      requestStart;
+
+    const message =
+      error instanceof Error
+        ? error.message
+        : String(error);
+
+    logStep(
+      "REQUEST FAILED"
+    );
+
+    logStep(
+      "ERROR",
+      message
+    );
+
+    logStep(
+      "TOTAL TIME",
+      `${totalTime} ms`
+    );
 
     return NextResponse.json(
       {
         success: false,
+
         message,
-        processingTimeMs: totalTime,
+
+        processingTimeMs:
+          totalTime,
       },
-      { status: 500 }
+      {
+        status: 500,
+      }
     );
   }
 }
