@@ -6,14 +6,14 @@ import crypto from "crypto";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const REGION = process.env.AWS_REGION || "ap-south-1";
+const REGION = process.env.DIZIAQUA_REGION || "ap-south-1";
 const S3_BUCKET = process.env.DIZIAQUA_S3_BUCKET || "diziaqua-images-320698389233";
 
 const s3Client = new S3Client({
   region: REGION,
   credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID || "",
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || "",
+    accessKeyId: process.env.DIZIAQUA_ACCESS_KEY_ID || "",
+    secretAccessKey: process.env.DIZIAQUA_SECRET_ACCESS_KEY || "",
   },
 });
 
@@ -37,7 +37,6 @@ export async function POST() {
       ContentType: "image/png",
     });
 
-    // Pre-signed URL expires in 5 minutes (300s)
     const uploadUrl = await getSignedUrl(s3Client, command, { expiresIn: 300 });
 
     return NextResponse.json(

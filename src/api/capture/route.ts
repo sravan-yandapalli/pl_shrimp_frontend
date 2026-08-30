@@ -4,40 +4,31 @@ import { SageMakerRuntimeClient, InvokeEndpointAsyncCommand } from "@aws-sdk/cli
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60; // Allows enough time for the scale-to-zero server to wake up
-
-// ============================================================
-// AWS CLIENTS (Uses credentials from .env.local)
-// ============================================================
+export const maxDuration = 60;
 
 const s3Client = new S3Client({
-  region: process.env.AWS_REGION || "ap-south-1",
+  region: process.env.DIZIAQUA_REGION || "ap-south-1",
   credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID || "",
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || "",
+    accessKeyId: process.env.DIZIAQUA_ACCESS_KEY_ID || "",
+    secretAccessKey: process.env.DIZIAQUA_SECRET_ACCESS_KEY || "",
   },
 });
 
 const smClient = new SageMakerRuntimeClient({
-  region: process.env.AWS_REGION || "ap-south-1",
+  region: process.env.DIZIAQUA_REGION || "ap-south-1",
   credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID || "",
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || "",
+    accessKeyId: process.env.DIZIAQUA_ACCESS_KEY_ID || "",
+    secretAccessKey: process.env.DIZIAQUA_SECRET_ACCESS_KEY || "",
   },
 });
 
 const ENDPOINT_NAME = "shrimp-async-endpoint";
-
-// ============================================================
-// TYPES
-// ============================================================
 
 type PredictionInput = {
   bucket: string;
   key: string;
 };
 
-// Replaces 'any' to fix your TypeScript error
 type BoundingBoxPrediction = {
   class: number;
   confidence: number;
@@ -52,17 +43,9 @@ type SageMakerPredictionResponse = {
   error?: string;
 };
 
-// ============================================================
-// DEBUG LOGGER
-// ============================================================
-
 function logStep(step: string, data?: unknown) {
   console.log(`[DIZIAQUA] ${new Date().toISOString()} - ${step}`, data ?? "");
 }
-
-// ============================================================
-// CALL SAGEMAKER (ASYNC POLLING LOGIC)
-// ============================================================
 
 async function callSageMakerCounter(
   bucket: string,
@@ -70,15 +53,12 @@ async function callSageMakerCounter(
 ): Promise<SageMakerPredictionResponse> {
   logStep("STARTING SAGEMAKER INVOCATION PROCESS");
 
-  // 1. Download original image from S3
-  logStep("1. Downloading image from S3", { bucket, key });
   const getImg = await s3Client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
   const imgBytes = await getImg.Body?.transformToByteArray();
   
   if (!imgBytes) throw new Error("Empty file received from S3");
   const base64Image = Buffer.from(imgBytes).toString("base64");
 
-  // 2. Upload JSON Payload for SageMaker Container
   const payloadKey = `async-inputs/payload-${Date.now()}.json`;
   logStep("2. Uploading Base64 JSON payload for SageMaker", { payloadKey });
   
@@ -89,7 +69,6 @@ async function callSageMakerCounter(
     ContentType: "application/json"
   }));
 
-  // 3. Invoke the Async Endpoint
   logStep("3. Invoking SageMaker Async Endpoint");
   const invokeRes = await smClient.send(new InvokeEndpointAsyncCommand({
     EndpointName: ENDPOINT_NAME,
@@ -99,13 +78,11 @@ async function callSageMakerCounter(
   const outputLocation = invokeRes.OutputLocation; 
   if (!outputLocation) throw new Error("SageMaker did not return an OutputLocation");
   
-  // Extract just the key from the s3://bucket/key URI
   const outputKey = outputLocation.replace(`s3://${bucket}/`, "");
-  logStep("   Waiting for result at", outputLocation);
+  logStep("  Waiting for result at", outputLocation);
 
-  // 4. Poll S3 for the Output File (Container is processing)
   let resultData = null;
-  const maxRetries = 35; // 35 retries * 1.5s = ~52 seconds
+  const maxRetries = 35;
   
   for (let i = 0; i < maxRetries; i++) {
     await new Promise(resolve => setTimeout(resolve, 1500)); 
@@ -117,7 +94,7 @@ async function callSageMakerCounter(
         break; 
       }
     } catch (err: unknown) {
-      const e = err as Error; // Fixes TypeScript 'any' error in catch block
+      const e = err as Error;
       if (e.name !== "NoSuchKey" && e.name !== "NotFound") {
         logStep("POLLING ERROR", e);
         throw e;
@@ -137,10 +114,6 @@ async function callSageMakerCounter(
     results: resultData.predictions,
   };
 }
-
-// ============================================================
-// POST /api/capture
-// ============================================================
 
 export async function POST(request: Request) {
   const requestStart = Date.now();
