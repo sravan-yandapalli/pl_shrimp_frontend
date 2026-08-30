@@ -1,51 +1,54 @@
 import { NextResponse } from "next/server";
-import {
-  LambdaClient,
-  InvokeCommand,
-} from "@aws-sdk/client-lambda";
+import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
+import { SageMakerRuntimeClient, InvokeEndpointAsyncCommand } from "@aws-sdk/client-sagemaker-runtime";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 60; // Allows enough time for the scale-to-zero server to wake up
 
 // ============================================================
-// AWS CONFIGURATION
+// AWS CLIENTS (Uses credentials from .env.local)
 // ============================================================
 
-const REGION =
-  process.env.AWS_REGION || "ap-south-1";
-
-const LAMBDA_FUNCTION_NAME =
-  process.env.DIZIAQUA_LAMBDA_FUNCTION_NAME ||
-  "diziaqua-counter";
-
-// ============================================================
-// AWS CLIENTS
-// ============================================================
-
-const lambdaClient = new LambdaClient({
-  region: REGION,
+const s3Client = new S3Client({
+  region: process.env.AWS_REGION || "ap-south-1",
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID || "",
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || "",
+  },
 });
+
+const smClient = new SageMakerRuntimeClient({
+  region: process.env.AWS_REGION || "ap-south-1",
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID || "",
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || "",
+  },
+});
+
+const ENDPOINT_NAME = "shrimp-async-endpoint";
 
 // ============================================================
 // TYPES
 // ============================================================
 
-type LambdaResultFile = {
+type PredictionInput = {
   bucket: string;
   key: string;
 };
 
-type LambdaInput = {
-  bucket: string;
-  key: string;
+// Replaces 'any' to fix your TypeScript error
+type BoundingBoxPrediction = {
+  class: number;
+  confidence: number;
+  bbox: [number, number, number, number];
 };
 
-type LambdaResponse = {
+type SageMakerPredictionResponse = {
   status: "success" | "error";
   count?: number;
-  input?: LambdaInput;
-  results?: Record<string, LambdaResultFile>;
+  input?: PredictionInput;
+  results?: BoundingBoxPrediction[];
   error?: string;
 };
 
@@ -53,298 +56,128 @@ type LambdaResponse = {
 // DEBUG LOGGER
 // ============================================================
 
-function logStep(
-  step: string,
-  data?: unknown
-) {
-  console.log(
-    `[DIZIAQUA] ${new Date().toISOString()} - ${step}`,
-    data ?? ""
-  );
+function logStep(step: string, data?: unknown) {
+  console.log(`[DIZIAQUA] ${new Date().toISOString()} - ${step}`, data ?? "");
 }
 
 // ============================================================
-// INVOKE LAMBDA
+// CALL SAGEMAKER (ASYNC POLLING LOGIC)
 // ============================================================
 
-async function invokeCounterLambda(
+async function callSageMakerCounter(
   bucket: string,
   key: string
-): Promise<LambdaResponse> {
-  const payload = {
-    bucket,
-    key,
-    output_prefix: "results/",
-  };
+): Promise<SageMakerPredictionResponse> {
+  logStep("STARTING SAGEMAKER INVOCATION PROCESS");
 
-  logStep(
-    "STARTING LAMBDA INVOCATION"
-  );
+  // 1. Download original image from S3
+  logStep("1. Downloading image from S3", { bucket, key });
+  const getImg = await s3Client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+  const imgBytes = await getImg.Body?.transformToByteArray();
+  
+  if (!imgBytes) throw new Error("Empty file received from S3");
+  const base64Image = Buffer.from(imgBytes).toString("base64");
 
-  logStep(
-    "Lambda function",
-    LAMBDA_FUNCTION_NAME
-  );
+  // 2. Upload JSON Payload for SageMaker Container
+  const payloadKey = `async-inputs/payload-${Date.now()}.json`;
+  logStep("2. Uploading Base64 JSON payload for SageMaker", { payloadKey });
+  
+  await s3Client.send(new PutObjectCommand({
+    Bucket: bucket,
+    Key: payloadKey,
+    Body: JSON.stringify({ image: base64Image }),
+    ContentType: "application/json"
+  }));
 
-  logStep(
-    "Lambda payload",
-    payload
-  );
+  // 3. Invoke the Async Endpoint
+  logStep("3. Invoking SageMaker Async Endpoint");
+  const invokeRes = await smClient.send(new InvokeEndpointAsyncCommand({
+    EndpointName: ENDPOINT_NAME,
+    InputLocation: `s3://${bucket}/${payloadKey}`,
+  }));
 
-  const startTime = Date.now();
-  let response;
+  const outputLocation = invokeRes.OutputLocation; 
+  if (!outputLocation) throw new Error("SageMaker did not return an OutputLocation");
+  
+  // Extract just the key from the s3://bucket/key URI
+  const outputKey = outputLocation.replace(`s3://${bucket}/`, "");
+  logStep("   Waiting for result at", outputLocation);
 
-  try {
-    const command = new InvokeCommand({
-      FunctionName: LAMBDA_FUNCTION_NAME,
-      InvocationType: "RequestResponse",
-      Payload: Buffer.from(
-        JSON.stringify(payload)
-      ),
-    });
-
-    response = await lambdaClient.send(command);
-  } catch (error) {
-    logStep(
-      "LAMBDA INVOCATION FAILED",
-      error
-    );
-
-    throw new Error(
-      `Could not invoke Lambda: ${
-        error instanceof Error
-          ? error.message
-          : String(error)
-      }`
-    );
-  }
-
-  const elapsed = Date.now() - startTime;
-
-  logStep(
-    "LAMBDA INVOCATION FINISHED",
-    `${elapsed} ms`
-  );
-
-  // ==========================================================
-  // FUNCTION ERROR
-  // ==========================================================
-
-  if (response.FunctionError) {
-    let errorPayload = "";
-
-    if (response.Payload) {
-      errorPayload = Buffer.from(
-        response.Payload
-      ).toString("utf-8");
-    }
-
-    logStep(
-      "LAMBDA FUNCTION ERROR",
-      errorPayload
-    );
-
-    throw new Error(
-      `Lambda execution failed: ${errorPayload}`
-    );
-  }
-
-  // ==========================================================
-  // EMPTY PAYLOAD
-  // ==========================================================
-
-  if (!response.Payload) {
-    logStep(
-      "LAMBDA RETURNED EMPTY PAYLOAD"
-    );
-
-    throw new Error(
-      "Lambda returned an empty response."
-    );
-  }
-
-  // ==========================================================
-  // CONVERT PAYLOAD TO TEXT
-  // ==========================================================
-
-  const responseText = Buffer.from(
-    response.Payload
-  ).toString("utf-8");
-
-  logStep(
-    "LAMBDA RAW RESPONSE",
-    responseText
-  );
-
-  // ==========================================================
-  // EMPTY TEXT
-  // ==========================================================
-
-  if (!responseText.trim()) {
-    throw new Error(
-      "Lambda returned an empty JSON body."
-    );
-  }
-
-  // ==========================================================
-  // PARSE JSON
-  // ==========================================================
-
-  let lambdaResponse: LambdaResponse;
-
-  try {
-    lambdaResponse = JSON.parse(
-      responseText
-    ) as LambdaResponse;
-  } catch (error) {
-    logStep(
-      "LAMBDA JSON PARSE FAILED",
-      {
-        responseText,
-        error:
-          error instanceof Error
-            ? error.message
-            : String(error),
+  // 4. Poll S3 for the Output File (Container is processing)
+  let resultData = null;
+  const maxRetries = 35; // 35 retries * 1.5s = ~52 seconds
+  
+  for (let i = 0; i < maxRetries; i++) {
+    await new Promise(resolve => setTimeout(resolve, 1500)); 
+    try {
+      const getOut = await s3Client.send(new GetObjectCommand({ Bucket: bucket, Key: outputKey }));
+      const outStr = await getOut.Body?.transformToString();
+      if (outStr) {
+        resultData = JSON.parse(outStr);
+        break; 
       }
-    );
-
-    throw new Error(
-      `Could not parse Lambda response: ${responseText}`
-    );
+    } catch (err: unknown) {
+      const e = err as Error; // Fixes TypeScript 'any' error in catch block
+      if (e.name !== "NoSuchKey" && e.name !== "NotFound") {
+        logStep("POLLING ERROR", e);
+        throw e;
+      }
+    }
   }
 
-  // ==========================================================
-  // CHECK STATUS
-  // ==========================================================
-
-  if (lambdaResponse.status !== "success") {
-    logStep(
-      "LAMBDA RETURNED ERROR",
-      lambdaResponse
-    );
-
-    throw new Error(
-      lambdaResponse.error ||
-        "Lambda processing failed."
-    );
+  if (!resultData) {
+    throw new Error("SageMaker inference timed out. The server might still be waking up (Cold Start).");
   }
 
-  // ==========================================================
-  // CHECK COUNT
-  // ==========================================================
+  logStep("SAGEMAKER SUCCESS", { count: resultData.shrimp_count });
 
-  if (typeof lambdaResponse.count !== "number") {
-    logStep(
-      "LAMBDA DID NOT RETURN VALID COUNT",
-      lambdaResponse
-    );
-
-    throw new Error(
-      "Lambda completed but did not return a valid count."
-    );
-  }
-
-  logStep(
-    "LAMBDA SUCCESS",
-    { count: lambdaResponse.count }
-  );
-
-  return lambdaResponse;
+  return {
+    status: "success",
+    count: resultData.shrimp_count,
+    results: resultData.predictions,
+  };
 }
 
 // ============================================================
 // POST /api/capture
 // ============================================================
 
-export async function POST(
-  request: Request
-) {
+export async function POST(request: Request) {
   const requestStart = Date.now();
 
-  logStep(
-    "========================================"
-  );
-  logStep("NEW PROCESSING REQUEST");
+  logStep("========================================");
+  logStep("NEW PROCESSING REQUEST (VIA SAGEMAKER)");
 
   try {
-    // ========================================================
-    // READ JSON PAYLOAD (No longer form-data)
-    // ========================================================
-    logStep("READING JSON BODY");
-
     const body = await request.json();
     const { bucket, key } = body;
 
-    logStep(
-      "PAYLOAD RECEIVED",
-      { bucket, key }
-    );
+    logStep("PAYLOAD RECEIVED", { bucket, key });
 
-    // ========================================================
-    // VALIDATE PAYLOAD
-    // ========================================================
     if (!bucket || !key) {
-      logStep("ERROR: MISSING BUCKET OR KEY");
-
       return NextResponse.json(
-        {
-          success: false,
-          message: "Missing bucket or key in request.",
-        },
+        { success: false, message: "Missing bucket or key in request." },
         { status: 400 }
       );
     }
 
-    // ========================================================
-    // INVOKE LAMBDA
-    // ========================================================
-    const lambdaStart = Date.now();
-
-    logStep("STARTING LAMBDA");
-
-    const lambdaResult = await invokeCounterLambda(
-      bucket,
-      key
-    );
-
-    logStep(
-      "LAMBDA COMPLETE",
-      {
-        elapsed: `${Date.now() - lambdaStart} ms`,
-        count: lambdaResult.count,
-      }
-    );
-
-    // ========================================================
-    // FINAL RESULT
-    // ========================================================
+    const smResult = await callSageMakerCounter(bucket, key);
     const totalTime = Date.now() - requestStart;
 
-    logStep(
-      "REQUEST COMPLETE",
-      {
-        totalTime: `${totalTime} ms`,
-        count: lambdaResult.count,
-      }
-    );
-    logStep(
-      "========================================"
-    );
+    logStep("REQUEST COMPLETE", {
+      totalTime: `${totalTime} ms`,
+      count: smResult.count,
+    });
+    logStep("========================================");
 
-    // ========================================================
-    // RETURN JSON
-    // ========================================================
     return NextResponse.json(
       {
         success: true,
-        count: lambdaResult.count,
+        count: smResult.count,
         fileName: key,
         processingTimeMs: totalTime,
-        input: {
-          bucket,
-          key,
-        },
-        results: lambdaResult.results || {},
+        input: { bucket, key },
+        results: smResult.results || [],
       },
       {
         status: 200,
@@ -356,21 +189,13 @@ export async function POST(
     );
   } catch (error) {
     const totalTime = Date.now() - requestStart;
+    const message = error instanceof Error ? error.message : String(error);
 
-    const message =
-      error instanceof Error
-        ? error.message
-        : String(error);
-
-    logStep(
-      "========================================"
-    );
+    logStep("========================================");
     logStep("REQUEST FAILED");
     logStep("ERROR", message);
     logStep("TOTAL TIME", `${totalTime} ms`);
-    logStep(
-      "========================================"
-    );
+    logStep("========================================");
 
     return NextResponse.json(
       {
@@ -378,13 +203,7 @@ export async function POST(
         message,
         processingTimeMs: totalTime,
       },
-      {
-        status: 500,
-        headers: {
-          "Cache-Control": "no-store",
-          "Content-Type": "application/json",
-        },
-      }
+      { status: 500 }
     );
   }
 }

@@ -7,15 +7,18 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const REGION = process.env.AWS_REGION || "ap-south-1";
-const S3_BUCKET = process.env.DIZIAQUA_S3_BUCKET || "diziaqua-images-913524939969";
+const S3_BUCKET = process.env.DIZIAQUA_S3_BUCKET || "diziaqua-images-320698389233";
 
 const s3Client = new S3Client({
   region: REGION,
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID || "",
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || "",
+  },
 });
 
 export async function POST() {
   try {
-    // Generate a unique filename using timestamp and random hex
     const now = new Date();
     const year = String(now.getFullYear());
     const month = String(now.getMonth() + 1).padStart(2, "0");
@@ -23,19 +26,18 @@ export async function POST() {
     const hours = String(now.getHours()).padStart(2, "0");
     const minutes = String(now.getMinutes()).padStart(2, "0");
     const seconds = String(now.getSeconds()).padStart(2, "0");
-    
+
     const timestamp = `${year}${month}${day}_${hours}${minutes}${seconds}`;
     const randomId = crypto.randomBytes(4).toString("hex");
     const key = `uploads/pl_capture_${timestamp}_${randomId}.png`;
 
-    // Create the command for S3
     const command = new PutObjectCommand({
       Bucket: S3_BUCKET,
       Key: key,
       ContentType: "image/png",
     });
 
-    // Generate a URL that expires in 5 minutes (300 seconds)
+    // Pre-signed URL expires in 5 minutes (300s)
     const uploadUrl = await getSignedUrl(s3Client, command, { expiresIn: 300 });
 
     return NextResponse.json(
@@ -50,9 +52,9 @@ export async function POST() {
   } catch (error) {
     console.error("Error generating pre-signed URL:", error);
     return NextResponse.json(
-      { 
-        success: false, 
-        message: error instanceof Error ? error.message : "Failed to generate upload URL" 
+      {
+        success: false,
+        message: error instanceof Error ? error.message : "Failed to generate upload URL",
       },
       { status: 500 }
     );
