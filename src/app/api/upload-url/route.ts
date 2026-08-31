@@ -6,17 +6,16 @@ import crypto from "crypto";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const REGION = process.env.DIZIAQUA_REGION || "ap-south-1";
+const REGION = process.env.NEXT_PUBLIC_DIZIAQUA_REGION || "ap-south-1";
 const S3_BUCKET =
-  process.env.DIZIAQUA_S3_BUCKET || "diziaqua-images-320698389233";
+  process.env.NEXT_PUBLIC_DIZIAQUA_S3_BUCKET || "diziaqua-images-320698389233";
 
 const s3Client = new S3Client({
   region: REGION,
   credentials: {
-    accessKeyId: process.env.DIZIAQUA_ACCESS_KEY_ID || "",
-    secretAccessKey: process.env.DIZIAQUA_SECRET_ACCESS_KEY || "",
+    accessKeyId: process.env.NEXT_PUBLIC_DIZIAQUA_ACCESS_KEY_ID || "",
+    secretAccessKey: process.env.NEXT_PUBLIC_DIZIAQUA_SECRET_ACCESS_KEY || "",
   },
-  // Stops the SDK from generating the 'AAAAAA==' dummy checksum
   requestChecksumCalculation: "WHEN_REQUIRED",
 });
 
@@ -37,7 +36,7 @@ export async function POST() {
     const command = new PutObjectCommand({
       Bucket: S3_BUCKET,
       Key: key,
-      ContentType: "image/png", // <--- THIS WAS MISSING!
+      ContentType: "image/png",
     });
 
     const uploadUrl = await getSignedUrl(s3Client, command, {

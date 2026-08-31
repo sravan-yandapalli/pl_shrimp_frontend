@@ -15,18 +15,18 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const REGION =
-  process.env.DIZIAQUA_REGION || "ap-south-1";
+  process.env.NEXT_PUBLIC_DIZIAQUA_REGION || "ap-south-1";
 
 const DEFAULT_BUCKET =
-  process.env.DIZIAQUA_S3_BUCKET ||
+  process.env.NEXT_PUBLIC_DIZIAQUA_S3_BUCKET ||
   "diziaqua-images-320698389233";
 
 const credentials = {
   accessKeyId:
-    process.env.DIZIAQUA_ACCESS_KEY_ID || "",
+    process.env.NEXT_PUBLIC_DIZIAQUA_ACCESS_KEY_ID || "",
 
   secretAccessKey:
-    process.env.DIZIAQUA_SECRET_ACCESS_KEY || "",
+    process.env.NEXT_PUBLIC_DIZIAQUA_SECRET_ACCESS_KEY || "",
 };
 
 const s3Client = new S3Client({
