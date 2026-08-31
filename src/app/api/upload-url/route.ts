@@ -8,8 +8,7 @@ export const dynamic = "force-dynamic";
 
 const REGION = process.env.DIZIAQUA_REGION || "ap-south-1";
 const S3_BUCKET =
-  process.env.DIZIAQUA_S3_BUCKET ||
-  "diziaqua-images-320698389233";
+  process.env.DIZIAQUA_S3_BUCKET || "diziaqua-images-320698389233";
 
 const s3Client = new S3Client({
   region: REGION,
@@ -22,7 +21,6 @@ const s3Client = new S3Client({
 export async function POST() {
   try {
     const now = new Date();
-
     const year = String(now.getFullYear());
     const month = String(now.getMonth() + 1).padStart(2, "0");
     const day = String(now.getDate()).padStart(2, "0");
@@ -30,13 +28,9 @@ export async function POST() {
     const minutes = String(now.getMinutes()).padStart(2, "0");
     const seconds = String(now.getSeconds()).padStart(2, "0");
 
-    const timestamp =
-      `${year}${month}${day}_${hours}${minutes}${seconds}`;
-
+    const timestamp = `${year}${month}${day}_${hours}${minutes}${seconds}`;
     const randomId = crypto.randomBytes(4).toString("hex");
-
-    const key =
-      `uploads/pl_capture_${timestamp}_${randomId}.png`;
+    const key = `uploads/pl_capture_${timestamp}_${randomId}.png`;
 
     const command = new PutObjectCommand({
       Bucket: S3_BUCKET,
@@ -44,13 +38,9 @@ export async function POST() {
       ContentType: "image/png",
     });
 
-    const uploadUrl = await getSignedUrl(
-      s3Client,
-      command,
-      {
-        expiresIn: 300,
-      }
-    );
+    const uploadUrl = await getSignedUrl(s3Client, command, {
+      expiresIn: 300,
+    });
 
     return NextResponse.json(
       {
@@ -61,13 +51,13 @@ export async function POST() {
       },
       {
         status: 200,
+        headers: {
+          "Cache-Control": "no-store",
+        },
       }
     );
   } catch (error) {
-    console.error(
-      "Error generating pre-signed URL:",
-      error
-    );
+    console.error("Error generating pre-signed URL:", error);
 
     return NextResponse.json(
       {
