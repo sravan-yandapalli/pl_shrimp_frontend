@@ -17,17 +17,13 @@ export interface CaptureResolution {
 export function useCamera() {
   const [cameraReady, setCameraReady] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
   const [captureResolution, setCaptureResolution] =
     useState<CaptureResolution | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-
   const startingRef = useRef(false);
-
-
 
   const setCameraTorch = useCallback(
     async (enabled: boolean) => {
@@ -73,8 +69,6 @@ export function useCamera() {
     []
   );
 
-
-
   const stopCamera = useCallback(() => {
     const stream = streamRef.current;
 
@@ -83,7 +77,7 @@ export function useCamera() {
         try {
           track.stop();
         } catch {
-     
+          // Ignore track stop errors.
         }
       });
     }
@@ -99,191 +93,200 @@ export function useCamera() {
     setCameraReady(false);
   }, []);
 
-
-
-  const startCamera = useCallback(async (): Promise<boolean> => {
-    if (startingRef.current) {
-      return false;
-    }
-
-    if (streamRef.current) {
-      setCameraReady(true);
-      return true;
-    }
-
-    startingRef.current = true;
-
-    try {
-      setErrorMessage(null);
-      setCaptureResolution(null);
-
-      if (
-        !navigator.mediaDevices ||
-        !navigator.mediaDevices.getUserMedia
-      ) {
-        setErrorMessage(
-          "Camera is not available in this browser."
-        );
-
+  const startCamera = useCallback(
+    async (): Promise<boolean> => {
+      if (startingRef.current) {
         return false;
       }
 
-      const video = videoRef.current;
-
-      if (!video) {
-        return false;
+      if (streamRef.current) {
+        setCameraReady(true);
+        return true;
       }
 
+      startingRef.current = true;
 
-
-      const stream =
-        await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: {
-              ideal: "environment",
-            },
-
-            width: {
-              ideal: 3840,
-            },
-
-            height: {
-              ideal: 2160,
-            },
-
-            frameRate: {
-              ideal: 30,
-            },
-          },
-
-          audio: false,
-        });
-
-      streamRef.current = stream;
-
-      const track = stream.getVideoTracks()[0];
-
-      if (track) {
-        console.log(
-          "========================================"
-        );
-
-        console.log(
-          "[DIZIAQUA] CAMERA DEVICE:",
-          track.label
-        );
-
-        console.log(
-          "[DIZIAQUA] ACTUAL VIDEO SETTINGS:",
-          track.getSettings()
-        );
-
-        try {
-          console.log(
-            "[DIZIAQUA] CAMERA CAPABILITIES:",
-            track.getCapabilities()
-          );
-        } catch {
-          console.warn(
-            "[DIZIAQUA] Camera capabilities unavailable."
-          );
-        }
-
-        console.log(
-          "========================================"
-        );
-      }
-
-      video.srcObject = stream;
-      video.playsInline = true;
-      video.muted = true;
-
-      await new Promise<void>((resolve, reject) => {
-        if (!video) {
-          reject(
-            new Error(
-              "Camera video element unavailable."
-            )
-          );
-          return;
-        }
+      try {
+        setErrorMessage(null);
+        setCaptureResolution(null);
 
         if (
-          video.readyState >=
-          HTMLMediaElement.HAVE_METADATA
+          !navigator.mediaDevices ||
+          !navigator.mediaDevices.getUserMedia
         ) {
-          resolve();
-          return;
+          setErrorMessage(
+            "Camera is not available in this browser."
+          );
+          return false;
         }
 
-        const handleLoadedMetadata = () => {
-          video.onloadedmetadata = null;
-          resolve();
-        };
+        const video = videoRef.current;
 
-        video.onloadedmetadata =
-          handleLoadedMetadata;
+        if (!video) {
+          return false;
+        }
 
-        setTimeout(() => {
+        const stream =
+          await navigator.mediaDevices.getUserMedia({
+            video: {
+              facingMode: {
+                ideal: "environment",
+              },
+
+              width: {
+                ideal: 3840,
+              },
+
+              height: {
+                ideal: 2160,
+              },
+
+              frameRate: {
+                ideal: 30,
+              },
+            },
+
+            audio: false,
+          });
+
+        streamRef.current = stream;
+
+        const track = stream.getVideoTracks()[0];
+
+        if (track) {
+          console.log(
+            "========================================"
+          );
+
+          console.log(
+            "[DIZIAQUA] CAMERA DEVICE:",
+            track.label
+          );
+
+          console.log(
+            "[DIZIAQUA] ACTUAL VIDEO SETTINGS:",
+            track.getSettings()
+          );
+
+          try {
+            console.log(
+              "[DIZIAQUA] CAMERA CAPABILITIES:",
+              track.getCapabilities()
+            );
+          } catch {
+            console.warn(
+              "[DIZIAQUA] Camera capabilities unavailable."
+            );
+          }
+
+          console.log(
+            "========================================"
+          );
+        }
+
+        video.srcObject = stream;
+        video.playsInline = true;
+        video.muted = true;
+
+        await new Promise<void>((resolve, reject) => {
+          if (!video) {
+            reject(
+              new Error(
+                "Camera video element unavailable."
+              )
+            );
+            return;
+          }
+
           if (
             video.readyState >=
             HTMLMediaElement.HAVE_METADATA
           ) {
+            resolve();
+            return;
+          }
+
+          const handleLoadedMetadata = () => {
             video.onloadedmetadata = null;
             resolve();
+          };
+
+          video.onloadedmetadata =
+            handleLoadedMetadata;
+
+          setTimeout(() => {
+            if (
+              video.readyState >=
+              HTMLMediaElement.HAVE_METADATA
+            ) {
+              video.onloadedmetadata = null;
+              resolve();
+            }
+          }, 5000);
+        });
+
+        await video.play();
+
+        setCameraReady(true);
+
+        return true;
+      } catch (error) {
+        console.error(
+          "Camera start failed:",
+          error
+        );
+
+        stopCamera();
+
+        let message =
+          "Unable to access the camera. Please allow camera permission.";
+
+        if (error instanceof DOMException) {
+          if (error.name === "NotAllowedError") {
+            message =
+              "Camera permission was denied. Please allow camera access in your browser settings.";
+          } else if (error.name === "NotFoundError") {
+            message =
+              "No camera was found on this device.";
+          } else if (
+            error.name === "NotReadableError"
+          ) {
+            message =
+              "The camera is currently being used by another app.";
+          } else if (error.name === "SecurityError") {
+            message =
+              "Camera access is blocked. Please use the website over HTTPS.";
+          } else if (
+            error.name === "OverconstrainedError"
+          ) {
+            message =
+              "The camera does not support the requested settings.";
           }
-        }, 5000);
-      });
-
-      await video.play();
-
-      setCameraReady(true);
-
-      return true;
-    } catch (error) {
-      console.error(
-        "Camera start failed:",
-        error
-      );
-
-      stopCamera();
-
-      let message =
-        "Unable to access the camera. Please allow camera permission.";
-
-      if (error instanceof DOMException) {
-        if (error.name === "NotAllowedError") {
-          message =
-            "Camera permission was denied. Please allow camera access in your browser settings.";
-        } else if (error.name === "NotFoundError") {
-          message =
-            "No camera was found on this device.";
-        } else if (
-          error.name === "NotReadableError"
-        ) {
-          message =
-            "The camera is currently being used by another app.";
-        } else if (error.name === "SecurityError") {
-          message =
-            "Camera access is blocked. Please use the website over HTTPS.";
-        } else if (
-          error.name === "OverconstrainedError"
-        ) {
-          message =
-            "The camera does not support the requested settings.";
         }
+
+        setErrorMessage(message);
+
+        return false;
+      } finally {
+        startingRef.current = false;
       }
+    },
+    [stopCamera]
+  );
 
-      setErrorMessage(message);
-
-      return false;
-    } finally {
-      startingRef.current = false;
-    }
-  }, [stopCamera]);
-
-
-
+  /**
+   * Process an ImageCapture still photo.
+   *
+   * IMPORTANT:
+   * We keep ImageCapture.takePhoto() for high-resolution capture.
+   *
+   * Instead of always forcing a square crop, we crop the
+   * high-resolution still to the SAME ASPECT RATIO as the
+   * live camera video.
+   *
+   * This prevents the captured image from appearing to zoom
+   * in/out or change framing after the user presses Capture.
+   */
   const processStillPhoto = useCallback(
     async (
       photoBlob: Blob,
@@ -308,17 +311,94 @@ export function useCamera() {
           return null;
         }
 
-        // Center square crop.
-        const sourceSize = Math.min(
-          sourceWidth,
-          sourceHeight
-        );
+        const video = videoRef.current;
 
-        const sourceStartX =
-          (sourceWidth - sourceSize) / 2;
+        /*
+         * Determine the aspect ratio that the user is
+         * actually seeing in the live camera.
+         *
+         * Prefer video.videoWidth/video.videoHeight.
+         * If unavailable, use the MediaStreamTrack settings.
+         */
+        let targetAspectRatio =
+          sourceWidth / sourceHeight;
 
-        const sourceStartY =
-          (sourceHeight - sourceSize) / 2;
+        if (
+          video &&
+          video.videoWidth > 0 &&
+          video.videoHeight > 0
+        ) {
+          targetAspectRatio =
+            video.videoWidth /
+            video.videoHeight;
+        } else {
+          const stream = streamRef.current;
+          const track =
+            stream?.getVideoTracks()[0];
+
+          const settings =
+            track?.getSettings();
+
+          if (
+            settings?.width &&
+            settings?.height
+          ) {
+            targetAspectRatio =
+              settings.width /
+              settings.height;
+          }
+        }
+
+        /*
+         * Calculate the largest crop from the high-resolution
+         * still that has the same aspect ratio as the live view.
+         *
+         * This preserves as much resolution as possible.
+         */
+        let cropWidth = sourceWidth;
+        let cropHeight = sourceHeight;
+
+        const sourceAspectRatio =
+          sourceWidth / sourceHeight;
+
+        if (
+          sourceAspectRatio >
+          targetAspectRatio
+        ) {
+          // Source is wider than the live view.
+          cropWidth =
+            Math.round(
+              sourceHeight *
+                targetAspectRatio
+            );
+        } else if (
+          sourceAspectRatio <
+          targetAspectRatio
+        ) {
+          // Source is taller than the live view.
+          cropHeight =
+            Math.round(
+              sourceWidth /
+                targetAspectRatio
+            );
+        }
+
+        /*
+         * Center the crop.
+         *
+         * The live preview and captured image now have
+         * the same aspect ratio and therefore the same
+         * framing behavior.
+         */
+        const cropX =
+          Math.round(
+            (sourceWidth - cropWidth) / 2
+          );
+
+        const cropY =
+          Math.round(
+            (sourceHeight - cropHeight) / 2
+          );
 
         const canvas = canvasRef.current;
 
@@ -327,11 +407,11 @@ export function useCamera() {
           return null;
         }
 
+        canvas.width = cropWidth;
+        canvas.height = cropHeight;
 
-        canvas.width = sourceSize;
-        canvas.height = sourceSize;
-
-        const ctx = canvas.getContext("2d");
+        const ctx =
+          canvas.getContext("2d");
 
         if (!ctx) {
           bitmap.close();
@@ -344,49 +424,57 @@ export function useCamera() {
         ctx.clearRect(
           0,
           0,
-          sourceSize,
-          sourceSize
+          cropWidth,
+          cropHeight
         );
 
+        /*
+         * Draw the SAME aspect-ratio crop that the user
+         * saw in the live camera.
+         */
         ctx.drawImage(
           bitmap,
-          sourceStartX,
-          sourceStartY,
-          sourceSize,
-          sourceSize,
+
+          cropX,
+          cropY,
+          cropWidth,
+          cropHeight,
+
           0,
           0,
-          sourceSize,
-          sourceSize
+          cropWidth,
+          cropHeight
         );
 
         bitmap.close();
 
-        // PNG is lossless.
-        // This preserves the pixels after the crop.
-        const finalBlob =
-          await new Promise<Blob | null>(
-            (resolve) => {
-              canvas.toBlob(
-                (blob) => {
-                  resolve(blob);
-                },
-                "image/png"
-              );
-            }
-          );
+        /*
+         * PNG keeps the image lossless.
+         */
+const finalBlob =
+  await new Promise<Blob | null>(
+    (resolve) => {
+      canvas.toBlob(
+        (blob) => {
+          resolve(blob);
+        },
+        "image/jpeg",
+        0.90
+      );
+    }
+  );
 
         if (!finalBlob) {
           return null;
         }
 
         const megapixels =
-          (sourceSize * sourceSize) /
+          (cropWidth * cropHeight) /
           1_000_000;
 
         const resolution: CaptureResolution = {
-          width: sourceSize,
-          height: sourceSize,
+          width: cropWidth,
+          height: cropHeight,
           megapixels,
           method,
           sourceWidth,
@@ -408,8 +496,23 @@ export function useCamera() {
         );
 
         console.log(
+          "[DIZIAQUA] LIVE ASPECT RATIO:",
+          targetAspectRatio
+        );
+
+        console.log(
+          "[DIZIAQUA] CROP:",
+          `${cropWidth} × ${cropHeight}`
+        );
+
+        console.log(
+          "[DIZIAQUA] CROP OFFSET:",
+          `x=${cropX}, y=${cropY}`
+        );
+
+        console.log(
           "[DIZIAQUA] FINAL MODEL IMAGE:",
-          `${sourceSize} × ${sourceSize}`
+          `${cropWidth} × ${cropHeight}`
         );
 
         console.log(
@@ -441,14 +544,13 @@ export function useCamera() {
     []
   );
 
-
-
   const captureFrame = useCallback(
     async (): Promise<{
       blob: Blob;
       url: string;
     } | null> => {
-      const stream = streamRef.current;
+      const stream =
+        streamRef.current;
 
       if (!stream || !cameraReady) {
         return null;
@@ -462,16 +564,24 @@ export function useCamera() {
       }
 
       try {
-
-
+        /*
+         * Turn torch on before capture.
+         */
         await setCameraTorch(true);
 
         await new Promise((resolve) => {
           setTimeout(resolve, 150);
         });
 
-
-
+        /*
+         * ====================================================
+         * PRIMARY METHOD:
+         * ImageCapture.takePhoto()
+         * ====================================================
+         *
+         * We KEEP this because it provides the best still
+         * image quality available from the camera.
+         */
         if (
           "ImageCapture" in window
         ) {
@@ -481,7 +591,9 @@ export function useCamera() {
 
             if (ImageCaptureClass) {
               const imageCapture =
-                new ImageCaptureClass(track);
+                new ImageCaptureClass(
+                  track
+                );
 
               const capabilities =
                 await imageCapture.getPhotoCapabilities();
@@ -502,6 +614,15 @@ export function useCamera() {
                 `${maxWidth} × ${maxHeight}`
               );
 
+              /*
+               * IMPORTANT:
+               *
+               * Continue requesting the maximum native
+               * photo resolution.
+               *
+               * processStillPhoto() will then crop it to
+               * the same aspect ratio as the live video.
+               */
               if (
                 maxWidth &&
                 maxHeight
@@ -545,13 +666,21 @@ export function useCamera() {
           }
         }
 
-
+        /*
+         * ====================================================
+         * FALLBACK:
+         * Capture directly from the live video frame.
+         * ====================================================
+         */
         console.log(
           "[DIZIAQUA] USING VIDEO/CANVAS FALLBACK"
         );
 
-        const video = videoRef.current;
-        const canvas = canvasRef.current;
+        const video =
+          videoRef.current;
+
+        const canvas =
+          canvasRef.current;
 
         if (
           !video ||
@@ -570,20 +699,42 @@ export function useCamera() {
         const sourceHeight =
           video.videoHeight;
 
-        const sourceSize =
-          Math.min(
-            sourceWidth,
-            sourceHeight
-          );
+        /*
+         * Keep the EXACT video aspect ratio.
+         */
+        const sourceAspectRatio =
+          sourceWidth /
+          sourceHeight;
 
-        const sourceStartX =
-          (sourceWidth - sourceSize) / 2;
+        let targetWidth =
+          sourceWidth;
 
-        const sourceStartY =
-          (sourceHeight - sourceSize) / 2;
+        let targetHeight =
+          sourceHeight;
 
-        canvas.width = sourceSize;
-        canvas.height = sourceSize;
+        /*
+         * Keep the native video frame.
+         */
+        if (
+          sourceAspectRatio >
+          1
+        ) {
+          targetWidth =
+            sourceWidth;
+          targetHeight =
+            sourceHeight;
+        } else {
+          targetWidth =
+            sourceWidth;
+          targetHeight =
+            sourceHeight;
+        }
+
+        canvas.width =
+          targetWidth;
+
+        canvas.height =
+          targetHeight;
 
         const ctx =
           canvas.getContext("2d");
@@ -593,37 +744,40 @@ export function useCamera() {
         }
 
         ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality =
-          "high";
+        ctx.imageSmoothingQuality = "high";
 
         ctx.clearRect(
           0,
           0,
-          sourceSize,
-          sourceSize
+          targetWidth,
+          targetHeight
         );
 
+        /*
+         * Capture exactly the video frame.
+         */
         ctx.drawImage(
           video,
-          sourceStartX,
-          sourceStartY,
-          sourceSize,
-          sourceSize,
           0,
           0,
-          sourceSize,
-          sourceSize
+          sourceWidth,
+          sourceHeight,
+          0,
+          0,
+          targetWidth,
+          targetHeight
         );
 
         const blob =
           await new Promise<Blob | null>(
             (resolve) => {
-              canvas.toBlob(
-                (result) => {
-                  resolve(result);
-                },
-                "image/png"
-              );
+                canvas.toBlob(
+                  (result) => {
+                    resolve(result);
+                  },
+                  "image/jpeg",
+                  0.90
+                );
             }
           );
 
@@ -632,15 +786,17 @@ export function useCamera() {
         }
 
         const megapixels =
-          (sourceSize * sourceSize) /
+          (targetWidth *
+            targetHeight) /
           1_000_000;
 
         const resolution: CaptureResolution =
           {
-            width: sourceSize,
-            height: sourceSize,
+            width: targetWidth,
+            height: targetHeight,
             megapixels,
-            method: "Video fallback",
+            method:
+              "Video fallback",
             sourceWidth,
             sourceHeight,
           };
@@ -664,7 +820,7 @@ export function useCamera() {
 
         console.log(
           "[DIZIAQUA] FINAL:",
-          `${sourceSize} × ${sourceSize}`
+          `${targetWidth} × ${targetHeight}`
         );
 
         console.log(
@@ -690,7 +846,9 @@ export function useCamera() {
 
         return null;
       } finally {
-        // Always turn torch off.
+        /*
+         * Always turn torch off.
+         */
         await setCameraTorch(false);
       }
     },
@@ -701,13 +859,11 @@ export function useCamera() {
     ]
   );
 
-
   useEffect(() => {
     return () => {
       stopCamera();
     };
   }, [stopCamera]);
-
 
   return {
     videoRef,
