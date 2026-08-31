@@ -37,6 +37,7 @@ export async function POST() {
     const command = new PutObjectCommand({
       Bucket: S3_BUCKET,
       Key: key,
+      ContentType: "image/png", // <--- THIS WAS MISSING!
     });
 
     const uploadUrl = await getSignedUrl(s3Client, command, {
