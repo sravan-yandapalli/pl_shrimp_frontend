@@ -31,6 +31,22 @@ export default function Home() {
   const cameraClickRef = useRef<HTMLAudioElement | null>(null);
 
   // ============================================================
+  // WARM-UP SAGEMAKER ENDPOINT ON PAGE LOAD
+  // ============================================================
+  useEffect(() => {
+    const warmUpEndpoint = async () => {
+      try {
+        await fetch("/api/warmup");
+        console.log("[DIZIAQUA] SageMaker warm-up signal sent.");
+      } catch (err) {
+        console.warn("[DIZIAQUA] Warm-up ping failed:", err);
+      }
+    };
+
+    void warmUpEndpoint();
+  }, []);
+
+  // ============================================================
   // AUTO-START CAMERA
   // Starts the camera whenever the app is in camera mode.
   // ============================================================
@@ -301,7 +317,6 @@ export default function Home() {
         bucket,
       } = await urlRes.json();
 
-      // ✅ ADDED BACK: The headers block specifying exactly "image/png"
       const uploadRes = await fetch(
         uploadUrl,
         {
