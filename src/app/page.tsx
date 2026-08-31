@@ -301,11 +301,14 @@ export default function Home() {
         bucket,
       } = await urlRes.json();
 
-      // 🚨 FIX: Removed headers block here to prevent 400 Signature Mismatch
+      // ✅ ADDED BACK: The headers block specifying exactly "image/png"
       const uploadRes = await fetch(
         uploadUrl,
         {
           method: "PUT",
+          headers: {
+            "Content-Type": "image/png",
+          },
           body: capturedBlob,
         }
       );
