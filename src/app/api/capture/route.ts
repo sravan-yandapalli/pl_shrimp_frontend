@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-
 import {
   SageMakerRuntimeClient,
   InvokeEndpointCommand,
 } from "@aws-sdk/client-sagemaker-runtime";
+import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,18 +13,11 @@ export const maxDuration = 60;
 // AWS CONFIGURATION
 // ============================================================
 
-const REGION =
-  process.env.NEXT_PUBLIC_DIZIAQUA_REGION ||
-  "ap-south-1";
+const REGION = process.env.NEXT_PUBLIC_DIZIAQUA_REGION || "ap-south-1";
 
 const credentials = {
-  accessKeyId:
-    process.env.NEXT_PUBLIC_DIZIAQUA_ACCESS_KEY_ID ||
-    "",
-
-  secretAccessKey:
-    process.env.NEXT_PUBLIC_DIZIAQUA_SECRET_ACCESS_KEY ||
-    "",
+  accessKeyId: process.env.NEXT_PUBLIC_DIZIAQUA_ACCESS_KEY_ID || "",
+  secretAccessKey: process.env.NEXT_PUBLIC_DIZIAQUA_SECRET_ACCESS_KEY || "",
 };
 
 const smClient = new SageMakerRuntimeClient({
@@ -32,13 +25,14 @@ const smClient = new SageMakerRuntimeClient({
   credentials,
 });
 
-// Your SageMaker endpoint
-const ENDPOINT_NAME = "shrimp-yolo-endpoint";
+const s3Client = new S3Client({
+  region: REGION,
+  credentials,
+});
 
-// Default S3 bucket
+const ENDPOINT_NAME = "shrimp-yolo-endpoint";
 const DEFAULT_BUCKET =
-  process.env.NEXT_PUBLIC_DIZIAQUA_S3_BUCKET ||
-  "diziaqua-images-320698389233";
+  process.env.NEXT_PUBLIC_DIZIAQUA_S3_BUCKET || "diziaqua-images-320698389233";
 
 // ============================================================
 // TYPES
@@ -47,12 +41,7 @@ const DEFAULT_BUCKET =
 type BoundingBoxPrediction = {
   class: number;
   confidence: number;
-  bbox: [
-    number,
-    number,
-    number,
-    number
-  ];
+  bbox: [number, number, number, number];
 };
 
 type SageMakerPredictionResponse = {
@@ -65,14 +54,8 @@ type SageMakerPredictionResponse = {
 // LOGGING
 // ============================================================
 
-function logStep(
-  step: string,
-  data?: unknown
-) {
-  console.log(
-    `[DIZIAQUA] ${new Date().toISOString()} - ${step}`,
-    data ?? ""
-  );
+function logStep(step: string, data?: unknown) {
+  console.log(`[DIZIAQUA] ${new Date().toISOString()} - ${step}`, data ?? "");
 }
 
 // ============================================================
@@ -83,135 +66,73 @@ async function callSageMakerCounter(
   bucket: string,
   key: string
 ): Promise<SageMakerPredictionResponse> {
-
-  logStep(
-    "STARTING SAGEMAKER INVOCATION",
-    {
-      endpoint: ENDPOINT_NAME,
-      bucket,
-      key,
-    }
-  );
-
-  // ----------------------------------------------------------
-  // IMPORTANT
-  //
-  // We DO NOT download the image here.
-  //
-  // We DO NOT convert the image to Base64.
-  //
-  // We send only the S3 bucket + key.
-  //
-  // SageMaker inference.py will download the original image
-  // directly from S3 and then split it into 640x640 tiles.
-  // ----------------------------------------------------------
-
-  const payload = JSON.stringify({
+  logStep("STARTING SAGEMAKER INVOCATION", {
+    endpoint: ENDPOINT_NAME,
     bucket,
     key,
   });
 
-  const payloadBytes =
-    Buffer.byteLength(payload);
-
-  logStep(
-    "SAGEMAKER PAYLOAD CREATED",
-    {
-      payloadBytes,
-      payloadMB: (
-        payloadBytes /
-        1024 /
-        1024
-      ).toFixed(4),
-      payload,
-    }
+  // 1. Download image from S3
+  logStep("DOWNLOADING IMAGE FROM S3 FOR INFERENCE", { bucket, key });
+  const s3Response = await s3Client.send(
+    new GetObjectCommand({
+      Bucket: bucket,
+      Key: key,
+    })
   );
 
-  // ----------------------------------------------------------
-  // Invoke SageMaker synchronously
-  // ----------------------------------------------------------
+  const byteArray = await s3Response.Body?.transformToByteArray();
+  if (!byteArray) {
+    throw new Error("Failed to read image bytes from S3");
+  }
 
-  logStep(
-    "CALLING SAGEMAKER ENDPOINT",
-    ENDPOINT_NAME
+  // 2. Convert to Base64
+  const base64Image = Buffer.from(byteArray).toString("base64");
+
+  // 3. Send payload formatted with the 'image' key SageMaker expects
+  const payload = JSON.stringify({
+    image: base64Image,
+  });
+
+  const payloadBytes = Buffer.byteLength(payload);
+  logStep("SAGEMAKER PAYLOAD CREATED", {
+    payloadBytes,
+    payloadMB: (payloadBytes / 1024 / 1024).toFixed(4),
+  });
+
+  // 4. Invoke SageMaker
+  logStep("CALLING SAGEMAKER ENDPOINT", ENDPOINT_NAME);
+  const response = await smClient.send(
+    new InvokeEndpointCommand({
+      EndpointName: ENDPOINT_NAME,
+      ContentType: "application/json",
+      Accept: "application/json",
+      Body: Buffer.from(payload),
+    })
   );
-
-  const response =
-    await smClient.send(
-      new InvokeEndpointCommand({
-        EndpointName:
-          ENDPOINT_NAME,
-
-        ContentType:
-          "application/json",
-
-        Accept:
-          "application/json",
-
-        Body:
-          Buffer.from(payload),
-      })
-    );
-
-  // ----------------------------------------------------------
-  // Check response
-  // ----------------------------------------------------------
 
   if (!response.Body) {
-    throw new Error(
-      "SageMaker returned an empty response"
-    );
+    throw new Error("SageMaker returned an empty response");
   }
 
-  const responseText =
-    Buffer
-      .from(response.Body)
-      .toString("utf-8");
+  const responseText = Buffer.from(response.Body).toString("utf-8");
+  logStep("SAGEMAKER RAW RESPONSE", responseText);
 
-  logStep(
-    "SAGEMAKER RAW RESPONSE",
-    responseText
-  );
-
-  let result:
-    SageMakerPredictionResponse;
-
+  let result: SageMakerPredictionResponse;
   try {
-
-    result =
-      JSON.parse(
-        responseText
-      ) as SageMakerPredictionResponse;
-
+    result = JSON.parse(responseText) as SageMakerPredictionResponse;
   } catch {
-
-    throw new Error(
-      "SageMaker returned invalid JSON: " +
-      responseText
-    );
+    throw new Error("SageMaker returned invalid JSON: " + responseText);
   }
-
-  // ----------------------------------------------------------
-  // SageMaker application-level error
-  // ----------------------------------------------------------
 
   if (result.error) {
-    throw new Error(
-      result.error
-    );
+    throw new Error(result.error);
   }
 
-  logStep(
-    "SAGEMAKER SUCCESS",
-    {
-      count:
-        result.shrimp_count,
-
-      predictions:
-        result.predictions?.length ||
-        0,
-    }
-  );
+  logStep("SAGEMAKER SUCCESS", {
+    count: result.shrimp_count,
+    predictions: result.predictions?.length || 0,
+  });
 
   return result;
 }
@@ -220,174 +141,61 @@ async function callSageMakerCounter(
 // POST
 // ============================================================
 
-export async function POST(
-  request: Request
-) {
-
-  const requestStart =
-    Date.now();
-
-  logStep(
-    "========================================"
-  );
-
-  logStep(
-    "NEW SHRIMP COUNT REQUEST"
-  );
+export async function POST(request: Request) {
+  const requestStart = Date.now();
+  logStep("========================================");
+  logStep("NEW SHRIMP COUNT REQUEST");
 
   try {
+    const body = await request.json();
+    const bucket = body.bucket || DEFAULT_BUCKET;
+    const key = body.key;
 
-    // --------------------------------------------------------
-    // 1. Read request from frontend
-    // --------------------------------------------------------
-
-    const body =
-      await request.json();
-
-    const bucket =
-      body.bucket ||
-      DEFAULT_BUCKET;
-
-    const key =
-      body.key;
-
-    logStep(
-      "PAYLOAD RECEIVED",
-      {
-        bucket,
-        key,
-      }
-    );
-
-    // --------------------------------------------------------
-    // 2. Validate key
-    // --------------------------------------------------------
+    logStep("PAYLOAD RECEIVED", { bucket, key });
 
     if (!key) {
-
       return NextResponse.json(
-        {
-          success: false,
-          message:
-            "Missing image key.",
-        },
-        {
-          status: 400,
-        }
+        { success: false, message: "Missing image key." },
+        { status: 400 }
       );
     }
 
-    // --------------------------------------------------------
-    // 3. Call SageMaker
-    // --------------------------------------------------------
+    const smResult = await callSageMakerCounter(bucket, key);
+    const totalTime = Date.now() - requestStart;
 
-    const smResult =
-      await callSageMakerCounter(
-        bucket,
-        key
-      );
-
-    // --------------------------------------------------------
-    // 4. Calculate processing time
-    // --------------------------------------------------------
-
-    const totalTime =
-      Date.now() -
-      requestStart;
-
-    // --------------------------------------------------------
-    // 5. Return result to frontend
-    // --------------------------------------------------------
-
-    logStep(
-      "RETURNING RESULT TO FRONTEND",
-      {
-        count:
-          smResult.shrimp_count ??
-          0,
-
-        predictions:
-          smResult.predictions?.length ||
-          0,
-
-        processingTimeMs:
-          totalTime,
-      }
-    );
+    logStep("RETURNING RESULT TO FRONTEND", {
+      count: smResult.shrimp_count ?? 0,
+      predictions: smResult.predictions?.length || 0,
+      processingTimeMs: totalTime,
+    });
 
     return NextResponse.json(
       {
         success: true,
-
-        count:
-          smResult.shrimp_count ??
-          0,
-
-        fileName:
-          key,
-
-        processingTimeMs:
-          totalTime,
-
-        input: {
-          bucket,
-          key,
-        },
-
-        results:
-          smResult.predictions ||
-          [],
+        count: smResult.shrimp_count ?? 0,
+        fileName: key,
+        processingTimeMs: totalTime,
+        input: { bucket, key },
+        results: smResult.predictions || [],
       },
       {
         status: 200,
-
         headers: {
-          "Cache-Control":
-            "no-store",
-
-          "Content-Type":
-            "application/json",
+          "Cache-Control": "no-store",
+          "Content-Type": "application/json",
         },
       }
     );
-
   } catch (error) {
+    const totalTime = Date.now() - requestStart;
+    const message = error instanceof Error ? error.message : String(error);
 
-    // --------------------------------------------------------
-    // ERROR HANDLING
-    // --------------------------------------------------------
-
-    const totalTime =
-      Date.now() -
-      requestStart;
-
-    const message =
-      error instanceof Error
-        ? error.message
-        : String(error);
-
-    console.error(
-      "[DIZIAQUA] REQUEST FAILED:",
-      error
-    );
-
-    logStep(
-      "TOTAL TIME",
-      `${totalTime} ms`
-    );
+    console.error("[DIZIAQUA] REQUEST FAILED:", error);
+    logStep("TOTAL TIME", `${totalTime} ms`);
 
     return NextResponse.json(
-      {
-        success: false,
-
-        message,
-
-        processingTimeMs:
-          totalTime,
-      },
-      {
-        status: 500,
-      }
+      { success: false, message, processingTimeMs: totalTime },
+      { status: 500 }
     );
   }
 }
