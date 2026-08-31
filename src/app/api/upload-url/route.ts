@@ -7,8 +7,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const REGION = process.env.DIZIAQUA_REGION || "ap-south-1";
-const S3_BUCKET =
-  process.env.DIZIAQUA_S3_BUCKET || "diziaqua-images-320698389233";
+const S3_BUCKET = process.env.DIZIAQUA_S3_BUCKET || "diziaqua-images-320698389233";
 
 const s3Client = new S3Client({
   region: REGION,
@@ -32,10 +31,10 @@ export async function POST() {
     const randomId = crypto.randomBytes(4).toString("hex");
     const key = `uploads/pl_capture_${timestamp}_${randomId}.png`;
 
+    // 🚨 Notice: We completely removed ContentType here so S3 accepts any image format
     const command = new PutObjectCommand({
       Bucket: S3_BUCKET,
       Key: key,
-      ContentType: "image/png",
     });
 
     const uploadUrl = await getSignedUrl(s3Client, command, {
@@ -43,33 +42,17 @@ export async function POST() {
     });
 
     return NextResponse.json(
-      {
-        success: true,
-        uploadUrl,
-        key,
-        bucket: S3_BUCKET,
-      },
-      {
-        status: 200,
-        headers: {
-          "Cache-Control": "no-store",
-        },
-      }
+      { success: true, uploadUrl, key, bucket: S3_BUCKET },
+      { status: 200, headers: { "Cache-Control": "no-store" } }
     );
   } catch (error) {
     console.error("Error generating pre-signed URL:", error);
-
     return NextResponse.json(
       {
         success: false,
-        message:
-          error instanceof Error
-            ? error.message
-            : "Failed to generate upload URL",
+        message: error instanceof Error ? error.message : "Failed to generate upload URL",
       },
-      {
-        status: 500,
-      }
+      { status: 500 }
     );
   }
 }

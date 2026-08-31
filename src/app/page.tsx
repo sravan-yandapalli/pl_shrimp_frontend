@@ -8,17 +8,17 @@ import StatusDisplay from "@/components/StatusDisplay";
 import CaptureControls from "@/components/CaptureControls";
 
 export default function Home() {
-const {
-  videoRef,
-  canvasRef,
-  cameraReady,
-  errorMessage,
-  setErrorMessage,
-  startCamera,
-  stopCamera,
-  captureFrame,
-  captureResolution,
-} = useCamera();
+  const {
+    videoRef,
+    canvasRef,
+    cameraReady,
+    errorMessage,
+    setErrorMessage,
+    startCamera,
+    stopCamera,
+    captureFrame,
+    captureResolution,
+  } = useCamera();
 
   const [isCaptured, setIsCaptured] = useState(false);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
@@ -301,13 +301,11 @@ const {
         bucket,
       } = await urlRes.json();
 
+      // 🚨 FIX: Removed headers block here to prevent 400 Signature Mismatch
       const uploadRes = await fetch(
         uploadUrl,
         {
           method: "PUT",
-          headers: {
-            "Content-Type": "image/png",
-          },
           body: capturedBlob,
         }
       );
