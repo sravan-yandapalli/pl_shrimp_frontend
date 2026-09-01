@@ -7,17 +7,6 @@ import Viewfinder from "@/components/Viewfinder";
 import StatusDisplay from "@/components/StatusDisplay";
 import CaptureControls from "@/components/CaptureControls";
 
-export interface Prediction {
-  class: number;
-  confidence: number;
-  bbox: [number, number, number, number];
-}
-
-export interface ImageSize {
-  width: number;
-  height: number;
-}
-
 export default function Home() {
   const {
     videoRef,
@@ -39,19 +28,16 @@ export default function Home() {
   const [count, setCount] = useState<number | null>(null);
   const [savedFileName, setSavedFileName] = useState<string | null>(null);
 
-  const [predictions, setPredictions] = useState<Prediction[]>([]);
-  const [imageSize, setImageSize] = useState<ImageSize | null>(null);
-
   const cameraClickRef = useRef<HTMLAudioElement | null>(null);
 
   // ============================================================
-  // WARM-UP SAGEMAKER ENDPOINT ON PAGE LOAD
+  // WARM-UP ENDPOINT ON PAGE LOAD
   // ============================================================
   useEffect(() => {
     const warmUpEndpoint = async () => {
       try {
         await fetch("/api/warmup");
-        console.log("[DIZIAQUA] SageMaker warm-up signal sent.");
+        console.log("[DIZIAQUA] Warm-up signal sent.");
       } catch (err) {
         console.warn("[DIZIAQUA] Warm-up ping failed:", err);
       }
@@ -69,7 +55,6 @@ export default function Home() {
       void startCamera();
     }
   }, [isCaptured, startCamera]);
-
 
   useEffect(() => {
     const handleVisibilityChange = () => {
@@ -130,10 +115,9 @@ export default function Home() {
     };
   }, []);
 
-
   useEffect(() => {
     return () => {
-      if (capturedImage) {
+      if (capturedImage && !capturedImage.startsWith("http")) {
         URL.revokeObjectURL(capturedImage);
       }
     };
@@ -146,7 +130,6 @@ export default function Home() {
       return;
     }
 
-
     const audio = cameraClickRef.current;
 
     if (audio) {
@@ -154,10 +137,11 @@ export default function Home() {
         audio.currentTime = 0;
         await audio.play();
       } catch {
+        // Ignore audio errors
       }
     }
 
-    if (capturedImage) {
+    if (capturedImage && !capturedImage.startsWith("http")) {
       URL.revokeObjectURL(capturedImage);
     }
 
@@ -167,14 +151,10 @@ export default function Home() {
     setSavedFileName(null);
     setErrorMessage(null);
     
-    setPredictions([]);
-    setImageSize(null);
-    
     setIsCaptured(true);
 
     stopCamera();
   };
-
 
   const handleUpload = (
     event: React.ChangeEvent<HTMLInputElement>
@@ -194,9 +174,6 @@ export default function Home() {
     setErrorMessage(null);
     setCount(null);
     setSavedFileName(null);
-    
-    setPredictions([]);
-    setImageSize(null);
 
     const image = new window.Image();
     const imageUrl = URL.createObjectURL(file);
@@ -265,7 +242,7 @@ export default function Home() {
             return;
           }
 
-          if (capturedImage) {
+          if (capturedImage && !capturedImage.startsWith("http")) {
             URL.revokeObjectURL(capturedImage);
           }
 
@@ -292,9 +269,8 @@ export default function Home() {
     image.src = imageUrl;
   };
 
-
   const handleRecapture = () => {
-    if (capturedImage) {
+    if (capturedImage && !capturedImage.startsWith("http")) {
       URL.revokeObjectURL(capturedImage);
     }
 
@@ -303,9 +279,6 @@ export default function Home() {
     setCount(null);
     setSavedFileName(null);
     setErrorMessage(null);
-    
-    setPredictions([]);
-    setImageSize(null);
     
     setIsCaptured(false);
   };
@@ -321,9 +294,6 @@ export default function Home() {
       setCount(null);
       setSavedFileName(null);
       setErrorMessage(null);
-      
-      setPredictions([]);
-      setImageSize(null);
 
       const urlRes = await fetch(
         "/api/upload-url",
@@ -380,10 +350,10 @@ export default function Home() {
       if (!processRes.ok) {
         throw new Error(
           result.message ||
+          result.error ||
             "Failed to process image."
         );
       }
-
 
       setSavedFileName(
         typeof result.fileName === "string"
@@ -391,29 +361,15 @@ export default function Home() {
           : key.split("/").pop() || key
       );
 
-      if (typeof result.count === "number") {
-        setCount(result.count);
+      // Support both potential keys depending on your Next.js API route mapping
+      const finalCount = result.shrimp_count ?? result.count;
+      if (typeof finalCount === "number") {
+        setCount(finalCount);
       }
       
-      // FIX 1: Look for 'results' or 'predictions'
-      if (result.results) {
-        setPredictions(result.results);
-      } else if (result.predictions) {
-        setPredictions(result.predictions);
-      }
-      
-      // FIX 2: Manually measure local image if the backend didn't send dimensions
-      if (result.image) {
-        setImageSize(result.image);
-      } else if (capturedImage) {
-        const img = new window.Image();
-        img.onload = () => {
-          setImageSize({
-            width: img.naturalWidth,
-            height: img.naturalHeight,
-          });
-        };
-        img.src = capturedImage;
+      // Swap out the local preview for the annotated S3 URL
+      if (result.annotated_image_url) {
+        setCapturedImage(result.annotated_image_url);
       }
 
     } catch (error) {
@@ -427,7 +383,6 @@ export default function Home() {
     }
   };
 
-
   return (
     <>
       <canvas
@@ -436,7 +391,6 @@ export default function Home() {
       />
 
       <div className="w-full h-[calc(100dvh-60px)] overflow-hidden flex flex-col items-center justify-between pt-6 pb-15 select-none bg-background">
-
         <div>
           <Image
             src="/images/inst.png"
@@ -447,13 +401,10 @@ export default function Home() {
           />
         </div>
 
-
         <Viewfinder
           isCaptured={isCaptured}
           capturedImage={capturedImage}
           videoRef={videoRef}
-          predictions={predictions}
-          imageSize={imageSize}
         />
 
         <StatusDisplay
@@ -463,7 +414,6 @@ export default function Home() {
           errorMessage={errorMessage}
           captureResolution={captureResolution}
         />
-
 
         <CaptureControls
           isCaptured={isCaptured}

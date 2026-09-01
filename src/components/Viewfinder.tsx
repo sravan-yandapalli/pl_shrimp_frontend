@@ -1,20 +1,15 @@
 import { RefObject } from "react";
-import { Prediction, ImageSize } from "../app/page"; 
 
 interface ViewfinderProps {
   isCaptured: boolean;
   capturedImage: string | null;
   videoRef: RefObject<HTMLVideoElement | null>;
-  predictions?: Prediction[];
-  imageSize?: ImageSize | null;
 }
 
 export default function Viewfinder({ 
   isCaptured, 
   capturedImage, 
   videoRef,
-  predictions = [],
-  imageSize = null,
 }: ViewfinderProps) {
   return (
     <div className="w-[300px] h-[300px] shrink-0 rounded-full bg-surface border-primary border-solid border-[2px] box-border relative overflow-hidden">
@@ -27,38 +22,11 @@ export default function Viewfinder({
           className="absolute inset-0 w-full h-full object-cover"
         />
       ) : (
-        <>
-          <img
-            src={capturedImage!}
-            alt="Captured shrimp sample"
-            className="absolute inset-0 w-full h-full object-cover"
-          />
-
-          {/* BOUNDING BOX OVERLAY */}
-          {imageSize &&
-            predictions.map((pred, idx) => {
-              const [x1, y1, x2, y2] = pred.bbox;
-
-              const left = (x1 / imageSize.width) * 100;
-              const top = (y1 / imageSize.height) * 100;
-              const width = ((x2 - x1) / imageSize.width) * 100;
-              const height = ((y2 - y1) / imageSize.height) * 100;
-
-              return (
-                <div
-                  key={idx}
-                  // REMOVED background color, ADDED thin 1px transparent border
-                  className="absolute border-[1px] border-solid border-[rgba(0,255,0,0.4)] pointer-events-none"
-                  style={{
-                    left: `${left}%`,
-                    top: `${top}%`,
-                    width: `${width}%`,
-                    height: `${height}%`,
-                  }}
-                />
-              );
-            })}
-        </>
+        <img
+          src={capturedImage!}
+          alt="Counted shrimp sample"
+          className="absolute inset-0 w-full h-full object-cover"
+        />
       )}
     </div>
   );
