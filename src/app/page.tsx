@@ -395,12 +395,25 @@ export default function Home() {
         setCount(result.count);
       }
       
-      if (result.predictions) {
+      // FIX 1: Look for 'results' or 'predictions'
+      if (result.results) {
+        setPredictions(result.results);
+      } else if (result.predictions) {
         setPredictions(result.predictions);
       }
       
+      // FIX 2: Manually measure local image if the backend didn't send dimensions
       if (result.image) {
         setImageSize(result.image);
+      } else if (capturedImage) {
+        const img = new window.Image();
+        img.onload = () => {
+          setImageSize({
+            width: img.naturalWidth,
+            height: img.naturalHeight,
+          });
+        };
+        img.src = capturedImage;
       }
 
     } catch (error) {
