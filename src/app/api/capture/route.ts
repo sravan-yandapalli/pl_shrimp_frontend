@@ -1,18 +1,40 @@
 "use client";
 
-import { useRef, useState } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
-export default function CameraCapture() {
-  const videoRef = useRef<HTMLVideoElement | null>(null);
+interface CameraCaptureProps {
+  onCapture?: (
+    imageDataUrl: string
+  ) => void;
 
-  const [capturedImage, setCapturedImage] =
-    useState<string | null>(null);
+  onRetake?: () => void;
+}
+
+export default function CameraCapture({
+  onCapture,
+  onRetake,
+}: CameraCaptureProps) {
+  const videoRef =
+    useRef<HTMLVideoElement | null>(null);
+
+  const streamRef =
+    useRef<MediaStream | null>(null);
+
+  const [cameraStarted, setCameraStarted] =
+    useState(false);
 
   const [isCaptured, setIsCaptured] =
     useState(false);
 
-  const [cameraStarted, setCameraStarted] =
-    useState(false);
+  const [capturedImage, setCapturedImage] =
+    useState<string | null>(null);
+
+  const [error, setError] =
+    useState<string | null>(null);
 
   // ==========================================================
   // START CAMERA
@@ -20,29 +42,45 @@ export default function CameraCapture() {
 
   const startCamera = async () => {
     try {
+      setError(null);
+
+      // Stop any previous camera
+      if (streamRef.current) {
+        streamRef.current
+          .getTracks()
+          .forEach((track) => track.stop());
+
+        streamRef.current = null;
+      }
+
       const stream =
         await navigator.mediaDevices.getUserMedia({
           video: {
             facingMode: {
               ideal: "environment",
             },
+
             width: {
               ideal: 1920,
             },
+
             height: {
               ideal: 1080,
             },
           },
+
           audio: false,
         });
 
-      const video = videoRef.current;
+      streamRef.current = stream;
+
+      const video =
+        videoRef.current;
 
       if (!video) {
-        console.error(
-          "Video element not available"
+        throw new Error(
+          "Video element is not available."
         );
-        return;
       }
 
       video.srcObject = stream;
@@ -52,11 +90,19 @@ export default function CameraCapture() {
       setCameraStarted(true);
       setIsCaptured(false);
 
-    } catch (error) {
+    } catch (err) {
       console.error(
-        "Unable to access camera:",
-        error
+        "Camera error:",
+        err
       );
+
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to access camera."
+      );
+
+      setCameraStarted(false);
     }
   };
 
@@ -65,67 +111,92 @@ export default function CameraCapture() {
   // ==========================================================
 
   const stopCamera = () => {
-    const video = videoRef.current;
-
-    if (!video) {
-      return;
-    }
-
-    const stream =
-      video.srcObject as MediaStream | null;
-
-    if (stream) {
-      stream
+    if (streamRef.current) {
+      streamRef.current
         .getTracks()
         .forEach((track) => {
           track.stop();
         });
+
+      streamRef.current = null;
     }
 
-    video.srcObject = null;
+    const video =
+      videoRef.current;
+
+    if (video) {
+      video.srcObject = null;
+    }
 
     setCameraStarted(false);
   };
 
   // ==========================================================
-  // CAPTURE 300 × 300 CENTER SQUARE
+  // CAPTURE IMAGE
+  //
+  // IMPORTANT:
+  //
+  // The resulting image is ACTUALLY 300 × 300 pixels.
+  //
+  // Example camera:
+  //
+  // 1920 × 1080
+  //
+  // Center square:
+  //
+  // 1080 × 1080
+  //
+  // Final:
+  //
+  // 300 × 300
   // ==========================================================
 
   const captureImage = (): string | null => {
-    const video = videoRef.current;
+    const video =
+      videoRef.current;
 
     if (!video) {
       console.error(
-        "Video element not available"
+        "Video element is not available."
       );
+
       return null;
     }
 
     // --------------------------------------------------------
-    // Make sure camera has a valid frame
+    // Check camera frame
     // --------------------------------------------------------
 
     if (
       video.readyState <
-        HTMLMediaElement.HAVE_CURRENT_DATA ||
+        HTMLMediaElement.HAVE_CURRENT_DATA
+    ) {
+      console.error(
+        "Camera frame is not ready."
+      );
+
+      return null;
+    }
+
+    if (
       video.videoWidth === 0 ||
       video.videoHeight === 0
     ) {
       console.error(
-        "Camera is not ready yet"
+        "Camera has no valid dimensions."
       );
 
       return null;
     }
 
     // --------------------------------------------------------
-    // FINAL IMAGE SIZE
+    // FINAL OUTPUT SIZE
     // --------------------------------------------------------
 
     const OUTPUT_SIZE = 300;
 
     // --------------------------------------------------------
-    // ACTUAL CAMERA FRAME SIZE
+    // ACTUAL CAMERA RESOLUTION
     // --------------------------------------------------------
 
     const videoWidth =
@@ -135,14 +206,12 @@ export default function CameraCapture() {
       video.videoHeight;
 
     console.log(
-      "Camera resolution:",
-      videoWidth,
-      "x",
-      videoHeight
+      "[CAMERA] Resolution:",
+      `${videoWidth}x${videoHeight}`
     );
 
     // --------------------------------------------------------
-    // GET CENTER SQUARE
+    // FIND LARGEST CENTER SQUARE
     // --------------------------------------------------------
 
     const cropSize =
@@ -151,23 +220,26 @@ export default function CameraCapture() {
         videoHeight
       );
 
+    // Center horizontally
     const sourceX =
       (videoWidth - cropSize) / 2;
 
+    // Center vertically
     const sourceY =
       (videoHeight - cropSize) / 2;
 
     console.log(
-      "Crop:",
+      "[CAMERA] Crop:",
       {
-        sourceX,
-        sourceY,
-        cropSize,
+        x: sourceX,
+        y: sourceY,
+        width: cropSize,
+        height: cropSize,
       }
     );
 
     // --------------------------------------------------------
-    // CREATE 300 × 300 CANVAS
+    // CREATE EXACT 300 × 300 CANVAS
     // --------------------------------------------------------
 
     const canvas =
@@ -186,7 +258,7 @@ export default function CameraCapture() {
 
     if (!context) {
       console.error(
-        "Could not create canvas context"
+        "Unable to create canvas context."
       );
 
       return null;
@@ -195,29 +267,31 @@ export default function CameraCapture() {
     // --------------------------------------------------------
     // DRAW CENTER SQUARE
     //
-    // Camera:
+    // SOURCE:
     //
-    // 1920 × 1080
+    //   sourceX
+    //   sourceY
+    //   cropSize
+    //   cropSize
     //
-    // Center crop:
+    // DESTINATION:
     //
-    // 1080 × 1080
-    //
-    // Output:
-    //
-    // 300 × 300
+    //   0
+    //   0
+    //   300
+    //   300
     // --------------------------------------------------------
 
     context.drawImage(
       video,
 
-      // SOURCE
+      // Source rectangle
       sourceX,
       sourceY,
       cropSize,
       cropSize,
 
-      // DESTINATION
+      // Destination rectangle
       0,
       0,
       OUTPUT_SIZE,
@@ -228,46 +302,60 @@ export default function CameraCapture() {
     // CONVERT TO JPEG
     // --------------------------------------------------------
 
-    const imageData =
+    const imageDataUrl =
       canvas.toDataURL(
         "image/jpeg",
         0.92
       );
 
     console.log(
-      "Captured image:",
+      "[CAMERA] CAPTURE COMPLETE",
       {
         width: canvas.width,
         height: canvas.height,
+        type: "image/jpeg",
         sizeKB: Math.round(
-          imageData.length / 1024
+          imageDataUrl.length / 1024
         ),
       }
     );
 
-    return imageData;
+    return imageDataUrl;
   };
 
   // ==========================================================
-  // CAPTURE BUTTON
+  // HANDLE CAPTURE
   // ==========================================================
 
   const handleCapture = () => {
-    const image =
+    const imageDataUrl =
       captureImage();
 
-    if (!image) {
+    if (!imageDataUrl) {
+      setError(
+        "Unable to capture image."
+      );
+
       return;
     }
 
-    // Save actual 300 × 300 image
-    setCapturedImage(image);
+    // Save captured image
+    setCapturedImage(
+      imageDataUrl
+    );
 
-    // Show captured image
+    // Switch from camera to captured image
     setIsCaptured(true);
 
     // Stop camera
     stopCamera();
+
+    // Send image to parent component
+    if (onCapture) {
+      onCapture(
+        imageDataUrl
+      );
+    }
   };
 
   // ==========================================================
@@ -277,9 +365,32 @@ export default function CameraCapture() {
   const handleRetake = async () => {
     setCapturedImage(null);
     setIsCaptured(false);
+    setError(null);
+
+    if (onRetake) {
+      onRetake();
+    }
 
     await startCamera();
   };
+
+  // ==========================================================
+  // CLEANUP
+  // ==========================================================
+
+  useEffect(() => {
+    return () => {
+      if (streamRef.current) {
+        streamRef.current
+          .getTracks()
+          .forEach((track) => {
+            track.stop();
+          });
+
+        streamRef.current = null;
+      }
+    };
+  }, []);
 
   // ==========================================================
   // RENDER
@@ -297,6 +408,7 @@ export default function CameraCapture() {
           relative
           w-[300px]
           h-[300px]
+          shrink-0
           overflow-hidden
           rounded-full
           bg-black
@@ -305,8 +417,11 @@ export default function CameraCapture() {
         "
       >
 
-        {!isCaptured ? (
+        {/* ==================================================
+            CAMERA
+            ================================================== */}
 
+        {!isCaptured && (
           <video
             ref={videoRef}
             autoPlay
@@ -320,93 +435,16 @@ export default function CameraCapture() {
               object-cover
             "
           />
-
-        ) : capturedImage ? (
-
-          <img
-            src={capturedImage}
-            alt="Captured image"
-            className="
-              absolute
-              inset-0
-              w-full
-              h-full
-              object-fill
-            "
-          />
-
-        ) : (
-
-          <div
-            className="
-              absolute
-              inset-0
-              flex
-              items-center
-              justify-center
-              text-white
-            "
-          >
-            No image
-          </div>
-
         )}
 
-      </div>
+        {/* ==================================================
+            CAPTURED 300 × 300 IMAGE
+            ================================================== */}
 
-      {/* ====================================================
-          BUTTONS
-          ==================================================== */}
-
-      {!cameraStarted &&
-        !isCaptured && (
-          <button
-            type="button"
-            onClick={startCamera}
-            className="
-              rounded-lg
-              bg-primary
-              px-5
-              py-3
-              text-white
-            "
-          >
-            Start Camera
-          </button>
-        )}
-
-      {cameraStarted &&
-        !isCaptured && (
-          <button
-            type="button"
-            onClick={handleCapture}
-            className="
-              rounded-full
-              bg-primary
-              px-6
-              py-3
-              text-white
-            "
-          >
-            Capture
-          </button>
-        )}
-
-      {isCaptured && (
-        <button
-          type="button"
-          onClick={handleRetake}
-          className="
-            rounded-lg
-            border
-            px-5
-            py-3
-          "
-        >
-          Retake
-        </button>
-      )}
-
-    </div>
-  );
-}
+        {isCaptured &&
+          capturedImage && (
+            <img
+              src={capturedImage}
+              alt="Captured shrimp sample"
+              className="
+                absolute
