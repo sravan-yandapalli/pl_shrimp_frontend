@@ -19,7 +19,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 // ============================================================
-// AWS CONFIGURATION
+// AWS CONFIG
 // ============================================================
 
 const REGION =
@@ -28,16 +28,14 @@ const REGION =
 
 const credentials = {
   accessKeyId:
-    process.env.NEXT_PUBLIC_DIZIAQUA_ACCESS_KEY_ID ||
-    "",
+    process.env.NEXT_PUBLIC_DIZIAQUA_ACCESS_KEY_ID || "",
 
   secretAccessKey:
-    process.env.NEXT_PUBLIC_DIZIAQUA_SECRET_ACCESS_KEY ||
-    "",
+    process.env.NEXT_PUBLIC_DIZIAQUA_SECRET_ACCESS_KEY || "",
 };
 
 // ============================================================
-// AWS CLIENTS
+// CLIENTS
 // ============================================================
 
 const smClient =
@@ -53,15 +51,11 @@ const s3Client =
   });
 
 // ============================================================
-// SAGEMAKER ENDPOINT
+// CONFIG
 // ============================================================
 
 const ENDPOINT_NAME =
   "shrimp-yolo-endpoint";
-
-// ============================================================
-// DEFAULT S3 BUCKET
-// ============================================================
 
 const DEFAULT_BUCKET =
   process.env.NEXT_PUBLIC_DIZIAQUA_S3_BUCKET ||
@@ -84,12 +78,13 @@ type BoundingBoxPrediction = {
   ];
 };
 
-type SageMakerPredictionResponse = {
+type SageMakerResponse = {
+  success?: boolean;
+
   shrimp_count?: number;
 
   predictions?: BoundingBoxPrediction[];
 
-  // Returned by inference.py
   annotated_image_url?: string;
 
   error?: string;
@@ -99,132 +94,38 @@ type SageMakerPredictionResponse = {
 // LOGGING
 // ============================================================
 
-function logStep(
-  step: string,
+function log(
+  message: string,
   data?: unknown
 ) {
   console.log(
-    `[DIZIAQUA] ${new Date().toISOString()} - ${step}`,
+    `[DIZIAQUA] ${message}`,
     data ?? ""
   );
 }
 
 // ============================================================
-// CREATE PRESIGNED URL
+// SAGEMAKER
 // ============================================================
 
-async function createAnnotatedImageUrl(
-  bucket: string,
-  s3Url: string
-): Promise<string> {
-
-  logStep(
-    "ANNOTATED S3 URL RECEIVED",
-    s3Url
-  );
-
-  let url: URL;
-
-  try {
-    url = new URL(s3Url);
-  } catch {
-    throw new Error(
-      "Invalid annotated image URL returned by SageMaker."
-    );
-  }
-
-  // ----------------------------------------------------------
-  // Convert URL pathname into S3 object key
-  //
-  // Example:
-  //
-  // /annotated/counted_81a2fc2a.jpg
-  //
-  // becomes:
-  //
-  // annotated/counted_81a2fc2a.jpg
-  // ----------------------------------------------------------
-
-  const annotatedKey =
-    decodeURIComponent(
-      url.pathname.replace(/^\/+/, "")
-    );
-
-  if (!annotatedKey) {
-    throw new Error(
-      "Annotated image S3 key is empty."
-    );
-  }
-
-  logStep(
-    "ANNOTATED S3 KEY",
-    {
-      bucket,
-      annotatedKey,
-    }
-  );
-
-  // ----------------------------------------------------------
-  // Verify/create presigned GET URL
-  // ----------------------------------------------------------
-
-  const signedUrl =
-    await getSignedUrl(
-      s3Client,
-
-      new GetObjectCommand({
-        Bucket: bucket,
-        Key: annotatedKey,
-      }),
-
-      {
-        expiresIn: 3600,
-      }
-    );
-
-  logStep(
-    "PRESIGNED ANNOTATED IMAGE URL CREATED"
-  );
-
-  return signedUrl;
-}
-
-// ============================================================
-// CALL SAGEMAKER
-// ============================================================
-
-async function callSageMakerCounter(
+async function invokeSageMaker(
   bucket: string,
   key: string
-): Promise<SageMakerPredictionResponse> {
+): Promise<SageMakerResponse> {
 
-  logStep(
-    "STARTING SAGEMAKER INVOCATION",
+  const payload = JSON.stringify({
+    bucket,
+    key,
+  });
+
+  log(
+    "Invoking SageMaker",
     {
       endpoint: ENDPOINT_NAME,
       bucket,
       key,
     }
   );
-
-  // ----------------------------------------------------------
-  // Payload sent to SageMaker
-  // ----------------------------------------------------------
-
-  const payload =
-    JSON.stringify({
-      bucket,
-      key,
-    });
-
-  logStep(
-    "SAGEMAKER PAYLOAD",
-    payload
-  );
-
-  // ----------------------------------------------------------
-  // Invoke endpoint
-  // ----------------------------------------------------------
 
   const response =
     await smClient.send(
@@ -243,51 +144,33 @@ async function callSageMakerCounter(
       })
     );
 
-  // ----------------------------------------------------------
-  // Validate response
-  // ----------------------------------------------------------
-
   if (!response.Body) {
     throw new Error(
       "SageMaker returned an empty response."
     );
   }
 
-  const responseText =
+  const text =
     Buffer
       .from(response.Body)
       .toString("utf-8");
 
-  logStep(
-    "SAGEMAKER RAW RESPONSE",
-    responseText
+  log(
+    "SageMaker response",
+    text
   );
 
-  // ----------------------------------------------------------
-  // Parse JSON
-  // ----------------------------------------------------------
-
-  let result:
-    SageMakerPredictionResponse;
+  let result: SageMakerResponse;
 
   try {
-
     result =
-      JSON.parse(
-        responseText
-      ) as SageMakerPredictionResponse;
-
+      JSON.parse(text) as SageMakerResponse;
   } catch {
-
     throw new Error(
-      "SageMaker returned invalid JSON: " +
-      responseText
+      "Invalid JSON returned by SageMaker: " +
+      text
     );
   }
-
-  // ----------------------------------------------------------
-  // Handle inference error
-  // ----------------------------------------------------------
 
   if (result.error) {
     throw new Error(
@@ -295,26 +178,64 @@ async function callSageMakerCounter(
     );
   }
 
-  // ----------------------------------------------------------
-  // Log success
-  // ----------------------------------------------------------
+  return result;
+}
 
-  logStep(
-    "SAGEMAKER SUCCESS",
+// ============================================================
+// PRESIGNED ANNOTATED IMAGE URL
+// ============================================================
+
+async function createPresignedImageUrl(
+  bucket: string,
+  annotatedS3Url: string
+): Promise<string> {
+
+  let parsed: URL;
+
+  try {
+    parsed =
+      new URL(annotatedS3Url);
+  } catch {
+    throw new Error(
+      "Invalid annotated image URL from SageMaker."
+    );
+  }
+
+  const key =
+    decodeURIComponent(
+      parsed.pathname.replace(/^\/+/, "")
+    );
+
+  if (!key) {
+    throw new Error(
+      "Could not determine annotated image S3 key."
+    );
+  }
+
+  log(
+    "Creating presigned URL",
     {
-      shrimpCount:
-        result.shrimp_count ?? 0,
-
-      predictionCount:
-        result.predictions?.length ?? 0,
-
-      annotatedImage:
-        result.annotated_image_url ||
-        null,
+      bucket,
+      key,
     }
   );
 
-  return result;
+  const command =
+    new GetObjectCommand({
+      Bucket: bucket,
+      Key: key,
+    });
+
+  const signedUrl =
+    await getSignedUrl(
+      s3Client,
+      command,
+      {
+        expiresIn: 3600,
+      }
+    );
+
+  return signedUrl;
 }
 
 // ============================================================
@@ -325,22 +246,14 @@ export async function POST(
   request: Request
 ) {
 
-  const requestStart =
+  const start =
     Date.now();
-
-  logStep(
-    "========================================"
-  );
-
-  logStep(
-    "NEW SHRIMP COUNT REQUEST"
-  );
 
   try {
 
-    // ========================================================
+    // --------------------------------------------------------
     // 1. READ REQUEST
-    // ========================================================
+    // --------------------------------------------------------
 
     const body =
       await request.json();
@@ -352,24 +265,11 @@ export async function POST(
     const key =
       body.key;
 
-    logStep(
-      "FRONTEND REQUEST",
-      {
-        bucket,
-        key,
-      }
-    );
-
-    // ========================================================
-    // 2. VALIDATE KEY
-    // ========================================================
-
     if (!key) {
 
       return NextResponse.json(
         {
           success: false,
-
           message:
             "Missing image key.",
         },
@@ -379,105 +279,90 @@ export async function POST(
       );
     }
 
-    // ========================================================
-    // 3. CALL SAGEMAKER
-    // ========================================================
+    log(
+      "Count request",
+      {
+        bucket,
+        key,
+      }
+    );
 
-    const smResult =
-      await callSageMakerCounter(
+    // --------------------------------------------------------
+    // 2. SAGEMAKER
+    // --------------------------------------------------------
+
+    const result =
+      await invokeSageMaker(
         bucket,
         key
       );
 
-    // ========================================================
-    // 4. CREATE PRESIGNED ANNOTATED IMAGE URL
-    // ========================================================
+    // --------------------------------------------------------
+    // 3. CREATE PRESIGNED URL
+    // --------------------------------------------------------
 
     let annotatedImageUrl:
       string | null = null;
 
     if (
-      smResult.annotated_image_url
+      result.annotated_image_url
     ) {
 
       annotatedImageUrl =
-        await createAnnotatedImageUrl(
+        await createPresignedImageUrl(
           bucket,
-          smResult.annotated_image_url
+          result.annotated_image_url
         );
 
     } else {
 
-      logStep(
-        "WARNING: SAGEMAKER DID NOT RETURN ANNOTATED IMAGE URL"
+      log(
+        "WARNING: No annotated_image_url returned"
       );
     }
 
-    // ========================================================
-    // 5. PROCESSING TIME
-    // ========================================================
+    // --------------------------------------------------------
+    // 4. PROCESSING TIME
+    // --------------------------------------------------------
 
-    const totalTime =
-      Date.now() -
-      requestStart;
+    const processingTimeMs =
+      Date.now() - start;
 
-    // ========================================================
-    // 6. FINAL RESPONSE
-    // ========================================================
+    // --------------------------------------------------------
+    // 5. FINAL RESPONSE
+    // --------------------------------------------------------
 
     const responseData = {
 
       success: true,
 
-      // ------------------------------------------------------
-      // Count
-      // ------------------------------------------------------
-
       count:
-        smResult.shrimp_count ??
-        0,
-
-      // ------------------------------------------------------
-      // Original uploaded file
-      // ------------------------------------------------------
+        result.shrimp_count ?? 0,
 
       fileName:
         key,
 
-      // ------------------------------------------------------
-      // IMPORTANT:
-      // PRESIGNED URL FOR FRONTEND
-      // ------------------------------------------------------
+      // Frontend should use this
+      imageUrl:
+        annotatedImageUrl,
 
-      annotatedImageUrl,
-
-      // ------------------------------------------------------
-      // Predictions
-      // ------------------------------------------------------
+      // Keep explicit name too
+      annotatedImageUrl:
+        annotatedImageUrl,
 
       results:
-        smResult.predictions ||
-        [],
-
-      // ------------------------------------------------------
-      // Input information
-      // ------------------------------------------------------
+        result.predictions ?? [],
 
       input: {
         bucket,
         key,
       },
 
-      // ------------------------------------------------------
-      // Processing time
-      // ------------------------------------------------------
-
-      processingTimeMs:
-        totalTime,
+      processingTimeMs,
     };
 
-    logStep(
-      "RETURNING RESULT TO FRONTEND",
+    log(
+      "Returning result",
       {
         count:
           responseData.count,
@@ -485,14 +370,9 @@ export async function POST(
         annotatedImageAvailable:
           !!responseData.annotatedImageUrl,
 
-        processingTimeMs:
-          responseData.processingTimeMs,
+        processingTimeMs,
       }
     );
-
-    // ========================================================
-    // 7. RETURN JSON
-    // ========================================================
 
     return NextResponse.json(
       responseData,
@@ -511,31 +391,17 @@ export async function POST(
 
   } catch (error) {
 
-    // ========================================================
-    // ERROR HANDLING
-    // ========================================================
-
-    const totalTime =
-      Date.now() -
-      requestStart;
-
     const message =
       error instanceof Error
         ? error.message
         : String(error);
 
-    console.error(
-      "[DIZIAQUA] REQUEST FAILED:",
-      error
-    );
+    const processingTimeMs =
+      Date.now() - start;
 
-    logStep(
-      "REQUEST FAILED",
-      {
-        message,
-        processingTimeMs:
-          totalTime,
-      }
+    console.error(
+      "[DIZIAQUA] Count API error:",
+      error
     );
 
     return NextResponse.json(
@@ -544,8 +410,7 @@ export async function POST(
 
         message,
 
-        processingTimeMs:
-          totalTime,
+        processingTimeMs,
       },
       {
         status: 500,
