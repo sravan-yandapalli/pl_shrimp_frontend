@@ -16,21 +16,39 @@ export default function Viewfinder({
   return (
     <div
       className="
+<<<<<<< Updated upstream
         relative
         w-[300px]
         h-[300px]
         shrink-0
         overflow-hidden
+=======
+        w-[300px]
+        h-[300px]
+        shrink-0
+>>>>>>> Stashed changes
         rounded-full
         bg-surface
         border
         border-primary/10
+<<<<<<< Updated upstream
+=======
+        box-border
+        relative
+        overflow-hidden
+>>>>>>> Stashed changes
       "
     >
       {!isCaptured ? (
+
         // ======================================================
+<<<<<<< Updated upstream
         // CAMERA
+=======
+        // EXACT LIVE CAMERA
+>>>>>>> Stashed changes
         // ======================================================
+
         <video
           ref={videoRef}
           autoPlay
@@ -44,10 +62,14 @@ export default function Viewfinder({
             object-cover
           "
         />
+
       ) : annotatedImageUrl ? (
+
         // ======================================================
-        // ANNOTATED RESULT
+        // ANNOTATED IMAGE
+        // NO ZOOM
         // ======================================================
+
         <img
           key={annotatedImageUrl}
           src={annotatedImageUrl}
@@ -57,13 +79,25 @@ export default function Viewfinder({
             inset-0
             w-full
             h-full
+<<<<<<< Updated upstream
             object-fill
+=======
+            object-contain
+>>>>>>> Stashed changes
           "
         />
+
       ) : capturedImage ? (
+
         // ======================================================
+<<<<<<< Updated upstream
         // 300 × 300 CAPTURE
+=======
+        // CAPTURED IMAGE
+        // NO ZOOM
+>>>>>>> Stashed changes
         // ======================================================
+
         <img
           src={capturedImage}
           alt="Captured shrimp sample"
@@ -72,27 +106,15 @@ export default function Viewfinder({
             inset-0
             w-full
             h-full
+<<<<<<< Updated upstream
             object-fill
+=======
+            object-contain
+>>>>>>> Stashed changes
           "
         />
-      ) : (
-        // ======================================================
-        // EMPTY
-        // ======================================================
-        <div
-          className="
-            absolute
-            inset-0
-            flex
-            items-center
-            justify-center
-            text-white
-            text-sm
-          "
-        >
-          No image
-        </div>
-      )}
+
+      ) : null}
     </div>
   );
 }
