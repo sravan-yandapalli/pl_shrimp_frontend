@@ -47,7 +47,8 @@ export default function Viewfinder({
               return (
                 <div
                   key={idx}
-                  className="absolute border-[1.5px] border-[#00ff00] bg-[rgba(0,255,0,0.15)] pointer-events-none"
+                  // REMOVED background color, ADDED thin 1px transparent border
+                  className="absolute border-[1px] border-solid border-[rgba(0,255,0,0.4)] pointer-events-none"
                   style={{
                     left: `${left}%`,
                     top: `${top}%`,
