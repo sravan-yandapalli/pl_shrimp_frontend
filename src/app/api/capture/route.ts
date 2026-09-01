@@ -19,7 +19,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 // ============================================================
-// AWS CONFIG
+// AWS CONFIGURATION
 // ============================================================
 
 const REGION =
@@ -28,14 +28,16 @@ const REGION =
 
 const credentials = {
   accessKeyId:
-    process.env.NEXT_PUBLIC_DIZIAQUA_ACCESS_KEY_ID || "",
+    process.env.NEXT_PUBLIC_DIZIAQUA_ACCESS_KEY_ID ||
+    "",
 
   secretAccessKey:
-    process.env.NEXT_PUBLIC_DIZIAQUA_SECRET_ACCESS_KEY || "",
+    process.env.NEXT_PUBLIC_DIZIAQUA_SECRET_ACCESS_KEY ||
+    "",
 };
 
 // ============================================================
-// CLIENTS
+// AWS CLIENTS
 // ============================================================
 
 const smClient =
@@ -51,7 +53,7 @@ const s3Client =
   });
 
 // ============================================================
-// CONFIG
+// CONFIGURATION
 // ============================================================
 
 const ENDPOINT_NAME =
@@ -99,13 +101,13 @@ function log(
   data?: unknown
 ) {
   console.log(
-    `[DIZIAQUA] ${message}`,
+    `[DIZIAQUA] ${new Date().toISOString()} - ${message}`,
     data ?? ""
   );
 }
 
 // ============================================================
-// SAGEMAKER
+// INVOKE SAGEMAKER
 // ============================================================
 
 async function invokeSageMaker(
@@ -113,16 +115,20 @@ async function invokeSageMaker(
   key: string
 ): Promise<SageMakerResponse> {
 
-  const payload = JSON.stringify({
-    bucket,
-    key,
-  });
+  const payload =
+    JSON.stringify({
+      bucket,
+      key,
+    });
 
   log(
-    "Invoking SageMaker",
+    "INVOKING SAGEMAKER",
     {
-      endpoint: ENDPOINT_NAME,
+      endpoint:
+        ENDPOINT_NAME,
+
       bucket,
+
       key,
     }
   );
@@ -144,45 +150,89 @@ async function invokeSageMaker(
       })
     );
 
+  // ==========================================================
+  // CHECK BODY
+  // ==========================================================
+
   if (!response.Body) {
     throw new Error(
       "SageMaker returned an empty response."
     );
   }
 
-  const text =
+  // ==========================================================
+  // READ RESPONSE
+  // ==========================================================
+
+  const responseText =
     Buffer
       .from(response.Body)
       .toString("utf-8");
 
   log(
-    "SageMaker response",
-    text
+    "SAGEMAKER RAW RESPONSE",
+    responseText
   );
 
-  let result: SageMakerResponse;
+  // ==========================================================
+  // PARSE JSON
+  // ==========================================================
+
+  let result:
+    SageMakerResponse;
 
   try {
+
     result =
-      JSON.parse(text) as SageMakerResponse;
+      JSON.parse(
+        responseText
+      ) as SageMakerResponse;
+
   } catch {
+
     throw new Error(
       "Invalid JSON returned by SageMaker: " +
-      text
+      responseText
     );
   }
 
+  // ==========================================================
+  // SAGEMAKER APPLICATION ERROR
+  // ==========================================================
+
   if (result.error) {
+
     throw new Error(
       result.error
     );
   }
 
+  // ==========================================================
+  // LOG SUCCESS
+  // ==========================================================
+
+  log(
+    "SAGEMAKER SUCCESS",
+    {
+      shrimpCount:
+        result.shrimp_count ??
+        0,
+
+      predictionCount:
+        result.predictions?.length ??
+        0,
+
+      annotatedImageUrl:
+        result.annotated_image_url ??
+        null,
+    }
+  );
+
   return result;
 }
 
 // ============================================================
-// PRESIGNED ANNOTATED IMAGE URL
+// CREATE PRESIGNED ANNOTATED IMAGE URL
 // ============================================================
 
 async function createPresignedImageUrl(
@@ -190,70 +240,110 @@ async function createPresignedImageUrl(
   annotatedS3Url: string
 ): Promise<string> {
 
-  let parsed: URL;
+  // ==========================================================
+  // PARSE URL
+  // ==========================================================
+
+  let parsedUrl: URL;
 
   try {
-    parsed =
-      new URL(annotatedS3Url);
+
+    parsedUrl =
+      new URL(
+        annotatedS3Url
+      );
+
   } catch {
+
     throw new Error(
-      "Invalid annotated image URL from SageMaker."
+      "Invalid annotated image URL returned by SageMaker."
     );
   }
 
-  const key =
+  // ==========================================================
+  // EXTRACT S3 OBJECT KEY
+  //
+  // Example:
+  //
+  // /annotated/counted_f70cecf6.jpg
+  //
+  // becomes:
+  //
+  // annotated/counted_f70cecf6.jpg
+  // ==========================================================
+
+  const annotatedKey =
     decodeURIComponent(
-      parsed.pathname.replace(/^\/+/, "")
+      parsedUrl.pathname
+        .replace(/^\/+/, "")
     );
 
-  if (!key) {
+  if (!annotatedKey) {
+
     throw new Error(
       "Could not determine annotated image S3 key."
     );
   }
 
   log(
-    "Creating presigned URL",
+    "ANNOTATED IMAGE KEY",
     {
       bucket,
-      key,
+      key:
+        annotatedKey,
     }
   );
 
+  // ==========================================================
+  // CREATE GET COMMAND
+  // ==========================================================
+
   const command =
     new GetObjectCommand({
-      Bucket: bucket,
-      Key: key,
+      Bucket:
+        bucket,
+
+      Key:
+        annotatedKey,
     });
+
+  // ==========================================================
+  // CREATE PRESIGNED URL
+  // ==========================================================
 
   const signedUrl =
     await getSignedUrl(
       s3Client,
       command,
       {
-        expiresIn: 3600,
+        expiresIn:
+          3600,
       }
     );
+
+  log(
+    "PRESIGNED URL CREATED"
+  );
 
   return signedUrl;
 }
 
 // ============================================================
-// POST
+// POST /api/count
 // ============================================================
 
 export async function POST(
   request: Request
 ) {
 
-  const start =
+  const startTime =
     Date.now();
 
   try {
 
-    // --------------------------------------------------------
+    // ========================================================
     // 1. READ REQUEST
-    // --------------------------------------------------------
+    // ========================================================
 
     const body =
       await request.json();
@@ -265,11 +355,27 @@ export async function POST(
     const key =
       body.key;
 
-    if (!key) {
+    log(
+      "COUNT REQUEST RECEIVED",
+      {
+        bucket,
+        key,
+      }
+    );
+
+    // ========================================================
+    // 2. VALIDATE
+    // ========================================================
+
+    if (
+      typeof key !== "string" ||
+      !key.trim()
+    ) {
 
       return NextResponse.json(
         {
           success: false,
+
           message:
             "Missing image key.",
         },
@@ -279,100 +385,133 @@ export async function POST(
       );
     }
 
-    log(
-      "Count request",
-      {
-        bucket,
-        key,
-      }
-    );
+    // ========================================================
+    // 3. INVOKE SAGEMAKER
+    // ========================================================
 
-    // --------------------------------------------------------
-    // 2. SAGEMAKER
-    // --------------------------------------------------------
-
-    const result =
+    const smResult =
       await invokeSageMaker(
         bucket,
         key
       );
 
-    // --------------------------------------------------------
-    // 3. CREATE PRESIGNED URL
-    // --------------------------------------------------------
+    // ========================================================
+    // 4. CREATE PRESIGNED IMAGE URL
+    // ========================================================
 
     let annotatedImageUrl:
       string | null = null;
 
     if (
-      result.annotated_image_url
+      typeof smResult.annotated_image_url ===
+      "string" &&
+      smResult.annotated_image_url.length >
+        0
     ) {
 
       annotatedImageUrl =
         await createPresignedImageUrl(
           bucket,
-          result.annotated_image_url
+          smResult.annotated_image_url
         );
 
     } else {
 
       log(
-        "WARNING: No annotated_image_url returned"
+        "WARNING: SageMaker did not return annotated_image_url"
       );
     }
 
-    // --------------------------------------------------------
-    // 4. PROCESSING TIME
-    // --------------------------------------------------------
+    // ========================================================
+    // 5. PROCESSING TIME
+    // ========================================================
 
     const processingTimeMs =
-      Date.now() - start;
+      Date.now() -
+      startTime;
 
-    // --------------------------------------------------------
-    // 5. FINAL RESPONSE
-    // --------------------------------------------------------
+    // ========================================================
+    // 6. CREATE RESPONSE
+    // ========================================================
 
     const responseData = {
 
       success: true,
 
+      // ------------------------------------------------------
+      // SHRIMP COUNT
+      // ------------------------------------------------------
+
       count:
-        result.shrimp_count ?? 0,
+        smResult.shrimp_count ??
+        0,
+
+      // ------------------------------------------------------
+      // ORIGINAL FILE
+      // ------------------------------------------------------
 
       fileName:
         key,
 
-      // Frontend should use this
+      // ------------------------------------------------------
+      // ANNOTATED IMAGE
+      // ------------------------------------------------------
+      //
+      // THIS IS THE PRESIGNED URL.
+      //
+      annotatedImageUrl,
+
+      // Also provide imageUrl for frontend compatibility.
       imageUrl:
         annotatedImageUrl,
 
-      // Keep explicit name too
-      annotatedImageUrl:
-        annotatedImageUrl,
+      // ------------------------------------------------------
+      // PREDICTIONS
+      // ------------------------------------------------------
 
       results:
-        result.predictions ?? [],
+        smResult.predictions ??
+        [],
+
+      // ------------------------------------------------------
+      // INPUT
+      // ------------------------------------------------------
 
       input: {
         bucket,
         key,
       },
 
+      // ------------------------------------------------------
+      // PROCESSING TIME
+      // ------------------------------------------------------
+
       processingTimeMs,
     };
 
+    // ========================================================
+    // LOG RESPONSE
+    // ========================================================
+
     log(
-      "Returning result",
+      "RETURNING RESULT",
       {
         count:
           responseData.count,
 
         annotatedImageAvailable:
-          !!responseData.annotatedImageUrl,
+          Boolean(
+            responseData.annotatedImageUrl
+          ),
 
-        processingTimeMs,
+        processingTimeMs:
+          responseData.processingTimeMs,
       }
     );
+
+    // ========================================================
+    // RETURN
+    // ========================================================
 
     return NextResponse.json(
       responseData,
@@ -391,16 +530,21 @@ export async function POST(
 
   } catch (error) {
 
+    // ========================================================
+    // ERROR
+    // ========================================================
+
+    const processingTimeMs =
+      Date.now() -
+      startTime;
+
     const message =
       error instanceof Error
         ? error.message
         : String(error);
 
-    const processingTimeMs =
-      Date.now() - start;
-
     console.error(
-      "[DIZIAQUA] Count API error:",
+      "[DIZIAQUA] COUNT API ERROR:",
       error
     );
 
