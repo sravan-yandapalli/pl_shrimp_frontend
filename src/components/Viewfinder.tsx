@@ -14,21 +14,20 @@ export default function Viewfinder({
   videoRef,
 }: ViewfinderProps) {
   return (
-    <div
-      className="
-        w-[300px]
-        h-[300px]
-        shrink-0
-        rounded-full
-        bg-surface
-        border-primary
-        border-solid
-        border-[2px]
-        box-border
-        relative
-        overflow-hidden
-      "
-    >
+<div
+  className="
+    w-[300px]
+    h-[300px]
+    shrink-0
+    rounded-full
+    bg-surface
+    border
+    border-primary/40
+    box-border
+    relative
+    overflow-hidden
+  "
+>
       {!isCaptured ? (
         // ======================================================
         // CAMERA PREVIEW
