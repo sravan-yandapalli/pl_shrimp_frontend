@@ -14,23 +14,22 @@ export default function Viewfinder({
   videoRef,
 }: ViewfinderProps) {
   return (
-<div
-  className="
-    w-[300px]
-    h-[300px]
-    shrink-0
-    rounded-full
-    bg-surface
-    border
-    border-primary/10
-    box-border
-    relative
-    overflow-hidden
-  "
->
+    <div
+      className="
+        relative
+        w-[300px]
+        h-[300px]
+        shrink-0
+        overflow-hidden
+        rounded-full
+        bg-surface
+        border
+        border-primary/10
+      "
+    >
       {!isCaptured ? (
         // ======================================================
-        // CAMERA PREVIEW
+        // CAMERA
         // ======================================================
         <video
           ref={videoRef}
@@ -58,12 +57,12 @@ export default function Viewfinder({
             inset-0
             w-full
             h-full
-            object-cover
+            object-fill
           "
         />
       ) : capturedImage ? (
         // ======================================================
-        // ORIGINAL CAPTURE
+        // 300 × 300 CAPTURE
         // ======================================================
         <img
           src={capturedImage}
@@ -73,7 +72,7 @@ export default function Viewfinder({
             inset-0
             w-full
             h-full
-            object-cover
+            object-fill
           "
         />
       ) : (
