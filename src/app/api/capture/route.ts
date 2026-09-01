@@ -60,7 +60,7 @@ const ENDPOINT_NAME =
   "shrimp-yolo-endpoint";
 
 // ============================================================
-// DEFAULT BUCKET
+// DEFAULT S3 BUCKET
 // ============================================================
 
 const DEFAULT_BUCKET =
@@ -89,6 +89,7 @@ type SageMakerPredictionResponse = {
 
   predictions?: BoundingBoxPrediction[];
 
+  // Returned by inference.py
   annotated_image_url?: string;
 
   error?: string;
@@ -106,6 +107,86 @@ function logStep(
     `[DIZIAQUA] ${new Date().toISOString()} - ${step}`,
     data ?? ""
   );
+}
+
+// ============================================================
+// CREATE PRESIGNED URL
+// ============================================================
+
+async function createAnnotatedImageUrl(
+  bucket: string,
+  s3Url: string
+): Promise<string> {
+
+  logStep(
+    "ANNOTATED S3 URL RECEIVED",
+    s3Url
+  );
+
+  let url: URL;
+
+  try {
+    url = new URL(s3Url);
+  } catch {
+    throw new Error(
+      "Invalid annotated image URL returned by SageMaker."
+    );
+  }
+
+  // ----------------------------------------------------------
+  // Convert URL pathname into S3 object key
+  //
+  // Example:
+  //
+  // /annotated/counted_81a2fc2a.jpg
+  //
+  // becomes:
+  //
+  // annotated/counted_81a2fc2a.jpg
+  // ----------------------------------------------------------
+
+  const annotatedKey =
+    decodeURIComponent(
+      url.pathname.replace(/^\/+/, "")
+    );
+
+  if (!annotatedKey) {
+    throw new Error(
+      "Annotated image S3 key is empty."
+    );
+  }
+
+  logStep(
+    "ANNOTATED S3 KEY",
+    {
+      bucket,
+      annotatedKey,
+    }
+  );
+
+  // ----------------------------------------------------------
+  // Verify/create presigned GET URL
+  // ----------------------------------------------------------
+
+  const signedUrl =
+    await getSignedUrl(
+      s3Client,
+
+      new GetObjectCommand({
+        Bucket: bucket,
+        Key: annotatedKey,
+      }),
+
+      {
+        expiresIn: 3600,
+      }
+    );
+
+  logStep(
+    "PRESIGNED ANNOTATED IMAGE URL CREATED"
+  );
+
+  return signedUrl;
 }
 
 // ============================================================
@@ -127,7 +208,7 @@ async function callSageMakerCounter(
   );
 
   // ----------------------------------------------------------
-  // Send S3 location to SageMaker
+  // Payload sent to SageMaker
   // ----------------------------------------------------------
 
   const payload =
@@ -137,7 +218,7 @@ async function callSageMakerCounter(
     });
 
   logStep(
-    "SAGEMAKER PAYLOAD CREATED",
+    "SAGEMAKER PAYLOAD",
     payload
   );
 
@@ -168,7 +249,7 @@ async function callSageMakerCounter(
 
   if (!response.Body) {
     throw new Error(
-      "SageMaker returned an empty response"
+      "SageMaker returned an empty response."
     );
   }
 
@@ -205,31 +286,30 @@ async function callSageMakerCounter(
   }
 
   // ----------------------------------------------------------
-  // Handle SageMaker error
+  // Handle inference error
   // ----------------------------------------------------------
 
   if (result.error) {
-
     throw new Error(
       result.error
     );
   }
 
   // ----------------------------------------------------------
-  // Log result
+  // Log success
   // ----------------------------------------------------------
 
   logStep(
     "SAGEMAKER SUCCESS",
     {
-      count:
+      shrimpCount:
         result.shrimp_count ?? 0,
 
-      predictions:
+      predictionCount:
         result.predictions?.length ?? 0,
 
-      annotatedImageUrl:
-        result.annotated_image_url ??
+      annotatedImage:
+        result.annotated_image_url ||
         null,
     }
   );
@@ -248,10 +328,18 @@ export async function POST(
   const requestStart =
     Date.now();
 
+  logStep(
+    "========================================"
+  );
+
+  logStep(
+    "NEW SHRIMP COUNT REQUEST"
+  );
+
   try {
 
     // ========================================================
-    // 1. READ FRONTEND REQUEST
+    // 1. READ REQUEST
     // ========================================================
 
     const body =
@@ -265,7 +353,7 @@ export async function POST(
       body.key;
 
     logStep(
-      "NEW SHRIMP COUNT REQUEST",
+      "FRONTEND REQUEST",
       {
         bucket,
         key,
@@ -273,7 +361,7 @@ export async function POST(
     );
 
     // ========================================================
-    // 2. VALIDATE
+    // 2. VALIDATE KEY
     // ========================================================
 
     if (!key) {
@@ -302,7 +390,7 @@ export async function POST(
       );
 
     // ========================================================
-    // 4. CREATE PRESIGNED URL
+    // 4. CREATE PRESIGNED ANNOTATED IMAGE URL
     // ========================================================
 
     let annotatedImageUrl:
@@ -312,83 +400,16 @@ export async function POST(
       smResult.annotated_image_url
     ) {
 
-      // ------------------------------------------------------
-      // Extract the S3 key from the URL returned by SageMaker.
-      //
-      // Example:
-      //
-      // https://bucket.s3.ap-south-1.amazonaws.com/
-      // annotated/counted_abc12345.jpg
-      //
-      // becomes:
-      //
-      // annotated/counted_abc12345.jpg
-      // ------------------------------------------------------
-
-      let annotatedKey = "";
-
-      try {
-
-        const parsedUrl =
-          new URL(
-            smResult.annotated_image_url
-          );
-
-        annotatedKey =
-          decodeURIComponent(
-            parsedUrl.pathname
-              .replace(/^\/+/, "")
-          );
-
-      } catch {
-
-        throw new Error(
-          "Invalid annotated image URL returned by SageMaker."
-        );
-      }
-
-      if (!annotatedKey) {
-
-        throw new Error(
-          "Could not determine annotated S3 key."
-        );
-      }
-
-      logStep(
-        "GENERATING PRESIGNED ANNOTATED IMAGE URL",
-        {
-          bucket,
-          annotatedKey,
-        }
-      );
-
-      // ------------------------------------------------------
-      // Generate private S3 download URL
-      // ------------------------------------------------------
-
       annotatedImageUrl =
-        await getSignedUrl(
-          s3Client,
-
-          new GetObjectCommand({
-            Bucket:
-              bucket,
-
-            Key:
-              annotatedKey,
-          }),
-
-          {
-            expiresIn:
-              3600,
-          }
+        await createAnnotatedImageUrl(
+          bucket,
+          smResult.annotated_image_url
         );
 
+    } else {
+
       logStep(
-        "PRESIGNED URL CREATED",
-        {
-          annotatedKey,
-        }
+        "WARNING: SAGEMAKER DID NOT RETURN ANNOTATED IMAGE URL"
       );
     }
 
@@ -401,58 +422,80 @@ export async function POST(
       requestStart;
 
     // ========================================================
-    // 6. RETURN TO FRONTEND
+    // 6. FINAL RESPONSE
     // ========================================================
 
-    const finalResponse = {
+    const responseData = {
 
       success: true,
+
+      // ------------------------------------------------------
+      // Count
+      // ------------------------------------------------------
 
       count:
         smResult.shrimp_count ??
         0,
 
+      // ------------------------------------------------------
+      // Original uploaded file
+      // ------------------------------------------------------
+
       fileName:
         key,
 
+      // ------------------------------------------------------
       // IMPORTANT:
-      // This is now a presigned URL.
+      // PRESIGNED URL FOR FRONTEND
+      // ------------------------------------------------------
+
       annotatedImageUrl,
 
-      // Keep original field too.
-      annotated_image_url:
-        smResult.annotated_image_url ??
-        null,
+      // ------------------------------------------------------
+      // Predictions
+      // ------------------------------------------------------
 
-      processingTimeMs:
-        totalTime,
+      results:
+        smResult.predictions ||
+        [],
+
+      // ------------------------------------------------------
+      // Input information
+      // ------------------------------------------------------
 
       input: {
         bucket,
         key,
       },
 
-      results:
-        smResult.predictions ||
-        [],
+      // ------------------------------------------------------
+      // Processing time
+      // ------------------------------------------------------
+
+      processingTimeMs:
+        totalTime,
     };
 
     logStep(
       "RETURNING RESULT TO FRONTEND",
       {
         count:
-          finalResponse.count,
+          responseData.count,
 
         annotatedImageAvailable:
-          !!annotatedImageUrl,
+          !!responseData.annotatedImageUrl,
 
         processingTimeMs:
-          totalTime,
+          responseData.processingTimeMs,
       }
     );
 
+    // ========================================================
+    // 7. RETURN JSON
+    // ========================================================
+
     return NextResponse.json(
-      finalResponse,
+      responseData,
       {
         status: 200,
 
@@ -484,6 +527,15 @@ export async function POST(
     console.error(
       "[DIZIAQUA] REQUEST FAILED:",
       error
+    );
+
+    logStep(
+      "REQUEST FAILED",
+      {
+        message,
+        processingTimeMs:
+          totalTime,
+      }
     );
 
     return NextResponse.json(
