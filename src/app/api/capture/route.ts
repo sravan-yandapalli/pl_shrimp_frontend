@@ -5,6 +5,15 @@ import {
   InvokeEndpointCommand,
 } from "@aws-sdk/client-sagemaker-runtime";
 
+import {
+  S3Client,
+  GetObjectCommand,
+} from "@aws-sdk/client-s3";
+
+import {
+  getSignedUrl,
+} from "@aws-sdk/s3-request-presigner";
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -27,19 +36,31 @@ const credentials = {
     "",
 };
 
-const smClient = new SageMakerRuntimeClient({
-  region: REGION,
-  credentials,
-});
+// ============================================================
+// AWS CLIENTS
+// ============================================================
+
+const smClient =
+  new SageMakerRuntimeClient({
+    region: REGION,
+    credentials,
+  });
+
+const s3Client =
+  new S3Client({
+    region: REGION,
+    credentials,
+  });
 
 // ============================================================
 // SAGEMAKER ENDPOINT
 // ============================================================
 
-const ENDPOINT_NAME = "shrimp-yolo-endpoint";
+const ENDPOINT_NAME =
+  "shrimp-yolo-endpoint";
 
 // ============================================================
-// DEFAULT S3 BUCKET
+// DEFAULT BUCKET
 // ============================================================
 
 const DEFAULT_BUCKET =
@@ -52,7 +73,9 @@ const DEFAULT_BUCKET =
 
 type BoundingBoxPrediction = {
   class: number;
+
   confidence: number;
+
   bbox: [
     number,
     number,
@@ -66,8 +89,6 @@ type SageMakerPredictionResponse = {
 
   predictions?: BoundingBoxPrediction[];
 
-  // IMPORTANT:
-  // This is returned by your inference.py
   annotated_image_url?: string;
 
   error?: string;
@@ -106,38 +127,23 @@ async function callSageMakerCounter(
   );
 
   // ----------------------------------------------------------
-  // Send S3 bucket + key to SageMaker
+  // Send S3 location to SageMaker
   // ----------------------------------------------------------
 
-  const payload = JSON.stringify({
-    bucket,
-    key,
-  });
-
-  const payloadBytes =
-    Buffer.byteLength(payload);
+  const payload =
+    JSON.stringify({
+      bucket,
+      key,
+    });
 
   logStep(
     "SAGEMAKER PAYLOAD CREATED",
-    {
-      payloadBytes,
-      payloadMB: (
-        payloadBytes /
-        1024 /
-        1024
-      ).toFixed(4),
-      payload,
-    }
+    payload
   );
 
   // ----------------------------------------------------------
-  // Invoke SageMaker
+  // Invoke endpoint
   // ----------------------------------------------------------
-
-  logStep(
-    "CALLING SAGEMAKER ENDPOINT",
-    ENDPOINT_NAME
-  );
 
   const response =
     await smClient.send(
@@ -157,7 +163,7 @@ async function callSageMakerCounter(
     );
 
   // ----------------------------------------------------------
-  // Check response
+  // Validate response
   // ----------------------------------------------------------
 
   if (!response.Body) {
@@ -199,31 +205,31 @@ async function callSageMakerCounter(
   }
 
   // ----------------------------------------------------------
-  // SageMaker application-level error
+  // Handle SageMaker error
   // ----------------------------------------------------------
 
   if (result.error) {
+
     throw new Error(
       result.error
     );
   }
 
   // ----------------------------------------------------------
-  // Log successful result
+  // Log result
   // ----------------------------------------------------------
 
   logStep(
     "SAGEMAKER SUCCESS",
     {
       count:
-        result.shrimp_count,
+        result.shrimp_count ?? 0,
 
       predictions:
-        result.predictions?.length ||
-        0,
+        result.predictions?.length ?? 0,
 
       annotatedImageUrl:
-        result.annotated_image_url ||
+        result.annotated_image_url ??
         null,
     }
   );
@@ -242,19 +248,11 @@ export async function POST(
   const requestStart =
     Date.now();
 
-  logStep(
-    "========================================"
-  );
-
-  logStep(
-    "NEW SHRIMP COUNT REQUEST"
-  );
-
   try {
 
-    // --------------------------------------------------------
-    // 1. READ REQUEST FROM FRONTEND
-    // --------------------------------------------------------
+    // ========================================================
+    // 1. READ FRONTEND REQUEST
+    // ========================================================
 
     const body =
       await request.json();
@@ -267,16 +265,16 @@ export async function POST(
       body.key;
 
     logStep(
-      "PAYLOAD RECEIVED",
+      "NEW SHRIMP COUNT REQUEST",
       {
         bucket,
         key,
       }
     );
 
-    // --------------------------------------------------------
-    // 2. VALIDATE IMAGE KEY
-    // --------------------------------------------------------
+    // ========================================================
+    // 2. VALIDATE
+    // ========================================================
 
     if (!key) {
 
@@ -293,9 +291,9 @@ export async function POST(
       );
     }
 
-    // --------------------------------------------------------
+    // ========================================================
     // 3. CALL SAGEMAKER
-    // --------------------------------------------------------
+    // ========================================================
 
     const smResult =
       await callSageMakerCounter(
@@ -303,113 +301,158 @@ export async function POST(
         key
       );
 
-    // --------------------------------------------------------
-    // 4. PROCESSING TIME
-    // --------------------------------------------------------
+    // ========================================================
+    // 4. CREATE PRESIGNED URL
+    // ========================================================
+
+    let annotatedImageUrl:
+      string | null = null;
+
+    if (
+      smResult.annotated_image_url
+    ) {
+
+      // ------------------------------------------------------
+      // Extract the S3 key from the URL returned by SageMaker.
+      //
+      // Example:
+      //
+      // https://bucket.s3.ap-south-1.amazonaws.com/
+      // annotated/counted_abc12345.jpg
+      //
+      // becomes:
+      //
+      // annotated/counted_abc12345.jpg
+      // ------------------------------------------------------
+
+      let annotatedKey = "";
+
+      try {
+
+        const parsedUrl =
+          new URL(
+            smResult.annotated_image_url
+          );
+
+        annotatedKey =
+          decodeURIComponent(
+            parsedUrl.pathname
+              .replace(/^\/+/, "")
+          );
+
+      } catch {
+
+        throw new Error(
+          "Invalid annotated image URL returned by SageMaker."
+        );
+      }
+
+      if (!annotatedKey) {
+
+        throw new Error(
+          "Could not determine annotated S3 key."
+        );
+      }
+
+      logStep(
+        "GENERATING PRESIGNED ANNOTATED IMAGE URL",
+        {
+          bucket,
+          annotatedKey,
+        }
+      );
+
+      // ------------------------------------------------------
+      // Generate private S3 download URL
+      // ------------------------------------------------------
+
+      annotatedImageUrl =
+        await getSignedUrl(
+          s3Client,
+
+          new GetObjectCommand({
+            Bucket:
+              bucket,
+
+            Key:
+              annotatedKey,
+          }),
+
+          {
+            expiresIn:
+              3600,
+          }
+        );
+
+      logStep(
+        "PRESIGNED URL CREATED",
+        {
+          annotatedKey,
+        }
+      );
+    }
+
+    // ========================================================
+    // 5. PROCESSING TIME
+    // ========================================================
 
     const totalTime =
       Date.now() -
       requestStart;
 
-    // --------------------------------------------------------
-    // 5. GET ANNOTATED IMAGE URL
-    //
-    // inference.py already returns:
-    //
-    // "annotated_image_url": s3_url
-    //
-    // So we simply pass it to the frontend.
-    // --------------------------------------------------------
+    // ========================================================
+    // 6. RETURN TO FRONTEND
+    // ========================================================
 
-    const annotatedImageUrl =
-      smResult.annotated_image_url ??
-      null;
+    const finalResponse = {
 
-    // --------------------------------------------------------
-    // 6. LOG RESULT
-    // --------------------------------------------------------
+      success: true,
+
+      count:
+        smResult.shrimp_count ??
+        0,
+
+      fileName:
+        key,
+
+      // IMPORTANT:
+      // This is now a presigned URL.
+      annotatedImageUrl,
+
+      // Keep original field too.
+      annotated_image_url:
+        smResult.annotated_image_url ??
+        null,
+
+      processingTimeMs:
+        totalTime,
+
+      input: {
+        bucket,
+        key,
+      },
+
+      results:
+        smResult.predictions ||
+        [],
+    };
 
     logStep(
       "RETURNING RESULT TO FRONTEND",
       {
         count:
-          smResult.shrimp_count ??
-          0,
+          finalResponse.count,
 
-        predictions:
-          smResult.predictions?.length ||
-          0,
-
-        annotatedImageUrl,
+        annotatedImageAvailable:
+          !!annotatedImageUrl,
 
         processingTimeMs:
           totalTime,
       }
     );
 
-    // --------------------------------------------------------
-    // 7. RETURN RESULT
-    // --------------------------------------------------------
-
     return NextResponse.json(
-      {
-        success: true,
-
-        // ------------------------------------------
-        // Shrimp count
-        // ------------------------------------------
-
-        count:
-          smResult.shrimp_count ??
-          0,
-
-        // ------------------------------------------
-        // ORIGINAL FILE NAME / S3 KEY
-        // ------------------------------------------
-
-        fileName:
-          key,
-
-        // ------------------------------------------
-        // ANNOTATED IMAGE
-        // IMPORTANT
-        // ------------------------------------------
-
-        annotatedImageUrl,
-
-        // ------------------------------------------
-        // Also return the original SageMaker field
-        // for debugging / compatibility
-        // ------------------------------------------
-
-        annotated_image_url:
-          smResult.annotated_image_url ??
-          null,
-
-        // ------------------------------------------
-        // Processing time
-        // ------------------------------------------
-
-        processingTimeMs:
-          totalTime,
-
-        // ------------------------------------------
-        // Input information
-        // ------------------------------------------
-
-        input: {
-          bucket,
-          key,
-        },
-
-        // ------------------------------------------
-        // Bounding box results
-        // ------------------------------------------
-
-        results:
-          smResult.predictions ||
-          [],
-      },
+      finalResponse,
       {
         status: 200,
 
@@ -425,9 +468,9 @@ export async function POST(
 
   } catch (error) {
 
-    // --------------------------------------------------------
+    // ========================================================
     // ERROR HANDLING
-    // --------------------------------------------------------
+    // ========================================================
 
     const totalTime =
       Date.now() -
@@ -443,11 +486,6 @@ export async function POST(
       error
     );
 
-    logStep(
-      "TOTAL TIME",
-      `${totalTime} ms`
-    );
-
     return NextResponse.json(
       {
         success: false,
@@ -459,6 +497,11 @@ export async function POST(
       },
       {
         status: 500,
+
+        headers: {
+          "Cache-Control":
+            "no-store",
+        },
       }
     );
   }
