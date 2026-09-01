@@ -32,10 +32,16 @@ const smClient = new SageMakerRuntimeClient({
   credentials,
 });
 
-// Your SageMaker endpoint
+// ============================================================
+// SAGEMAKER ENDPOINT
+// ============================================================
+
 const ENDPOINT_NAME = "shrimp-yolo-endpoint";
 
-// Default S3 bucket
+// ============================================================
+// DEFAULT S3 BUCKET
+// ============================================================
+
 const DEFAULT_BUCKET =
   process.env.NEXT_PUBLIC_DIZIAQUA_S3_BUCKET ||
   "diziaqua-images-320698389233";
@@ -57,7 +63,13 @@ type BoundingBoxPrediction = {
 
 type SageMakerPredictionResponse = {
   shrimp_count?: number;
+
   predictions?: BoundingBoxPrediction[];
+
+  // IMPORTANT:
+  // This is returned by your inference.py
+  annotated_image_url?: string;
+
   error?: string;
 };
 
@@ -94,16 +106,7 @@ async function callSageMakerCounter(
   );
 
   // ----------------------------------------------------------
-  // IMPORTANT
-  //
-  // We DO NOT download the image here.
-  //
-  // We DO NOT convert the image to Base64.
-  //
-  // We send only the S3 bucket + key.
-  //
-  // SageMaker inference.py will download the original image
-  // directly from S3 and then split it into 640x640 tiles.
+  // Send S3 bucket + key to SageMaker
   // ----------------------------------------------------------
 
   const payload = JSON.stringify({
@@ -128,7 +131,7 @@ async function callSageMakerCounter(
   );
 
   // ----------------------------------------------------------
-  // Invoke SageMaker synchronously
+  // Invoke SageMaker
   // ----------------------------------------------------------
 
   logStep(
@@ -173,6 +176,10 @@ async function callSageMakerCounter(
     responseText
   );
 
+  // ----------------------------------------------------------
+  // Parse JSON
+  // ----------------------------------------------------------
+
   let result:
     SageMakerPredictionResponse;
 
@@ -201,6 +208,10 @@ async function callSageMakerCounter(
     );
   }
 
+  // ----------------------------------------------------------
+  // Log successful result
+  // ----------------------------------------------------------
+
   logStep(
     "SAGEMAKER SUCCESS",
     {
@@ -210,6 +221,10 @@ async function callSageMakerCounter(
       predictions:
         result.predictions?.length ||
         0,
+
+      annotatedImageUrl:
+        result.annotated_image_url ||
+        null,
     }
   );
 
@@ -238,7 +253,7 @@ export async function POST(
   try {
 
     // --------------------------------------------------------
-    // 1. Read request from frontend
+    // 1. READ REQUEST FROM FRONTEND
     // --------------------------------------------------------
 
     const body =
@@ -260,7 +275,7 @@ export async function POST(
     );
 
     // --------------------------------------------------------
-    // 2. Validate key
+    // 2. VALIDATE IMAGE KEY
     // --------------------------------------------------------
 
     if (!key) {
@@ -268,6 +283,7 @@ export async function POST(
       return NextResponse.json(
         {
           success: false,
+
           message:
             "Missing image key.",
         },
@@ -278,7 +294,7 @@ export async function POST(
     }
 
     // --------------------------------------------------------
-    // 3. Call SageMaker
+    // 3. CALL SAGEMAKER
     // --------------------------------------------------------
 
     const smResult =
@@ -288,7 +304,7 @@ export async function POST(
       );
 
     // --------------------------------------------------------
-    // 4. Calculate processing time
+    // 4. PROCESSING TIME
     // --------------------------------------------------------
 
     const totalTime =
@@ -296,7 +312,21 @@ export async function POST(
       requestStart;
 
     // --------------------------------------------------------
-    // 5. Return result to frontend
+    // 5. GET ANNOTATED IMAGE URL
+    //
+    // inference.py already returns:
+    //
+    // "annotated_image_url": s3_url
+    //
+    // So we simply pass it to the frontend.
+    // --------------------------------------------------------
+
+    const annotatedImageUrl =
+      smResult.annotated_image_url ??
+      null;
+
+    // --------------------------------------------------------
+    // 6. LOG RESULT
     // --------------------------------------------------------
 
     logStep(
@@ -310,29 +340,71 @@ export async function POST(
           smResult.predictions?.length ||
           0,
 
+        annotatedImageUrl,
+
         processingTimeMs:
           totalTime,
       }
     );
 
+    // --------------------------------------------------------
+    // 7. RETURN RESULT
+    // --------------------------------------------------------
+
     return NextResponse.json(
       {
         success: true,
+
+        // ------------------------------------------
+        // Shrimp count
+        // ------------------------------------------
 
         count:
           smResult.shrimp_count ??
           0,
 
+        // ------------------------------------------
+        // ORIGINAL FILE NAME / S3 KEY
+        // ------------------------------------------
+
         fileName:
           key,
 
+        // ------------------------------------------
+        // ANNOTATED IMAGE
+        // IMPORTANT
+        // ------------------------------------------
+
+        annotatedImageUrl,
+
+        // ------------------------------------------
+        // Also return the original SageMaker field
+        // for debugging / compatibility
+        // ------------------------------------------
+
+        annotated_image_url:
+          smResult.annotated_image_url ??
+          null,
+
+        // ------------------------------------------
+        // Processing time
+        // ------------------------------------------
+
         processingTimeMs:
           totalTime,
+
+        // ------------------------------------------
+        // Input information
+        // ------------------------------------------
 
         input: {
           bucket,
           key,
         },
+
+        // ------------------------------------------
+        // Bounding box results
+        // ------------------------------------------
 
         results:
           smResult.predictions ||
