@@ -7,6 +7,17 @@ import Viewfinder from "@/components/Viewfinder";
 import StatusDisplay from "@/components/StatusDisplay";
 import CaptureControls from "@/components/CaptureControls";
 
+export interface Prediction {
+  class: number;
+  confidence: number;
+  bbox: [number, number, number, number];
+}
+
+export interface ImageSize {
+  width: number;
+  height: number;
+}
+
 export default function Home() {
   const {
     videoRef,
@@ -27,6 +38,9 @@ export default function Home() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [count, setCount] = useState<number | null>(null);
   const [savedFileName, setSavedFileName] = useState<string | null>(null);
+
+  const [predictions, setPredictions] = useState<Prediction[]>([]);
+  const [imageSize, setImageSize] = useState<ImageSize | null>(null);
 
   const cameraClickRef = useRef<HTMLAudioElement | null>(null);
 
@@ -140,7 +154,6 @@ export default function Home() {
         audio.currentTime = 0;
         await audio.play();
       } catch {
-
       }
     }
 
@@ -153,6 +166,10 @@ export default function Home() {
     setCount(null);
     setSavedFileName(null);
     setErrorMessage(null);
+    
+    setPredictions([]);
+    setImageSize(null);
+    
     setIsCaptured(true);
 
     stopCamera();
@@ -177,6 +194,9 @@ export default function Home() {
     setErrorMessage(null);
     setCount(null);
     setSavedFileName(null);
+    
+    setPredictions([]);
+    setImageSize(null);
 
     const image = new window.Image();
     const imageUrl = URL.createObjectURL(file);
@@ -283,6 +303,10 @@ export default function Home() {
     setCount(null);
     setSavedFileName(null);
     setErrorMessage(null);
+    
+    setPredictions([]);
+    setImageSize(null);
+    
     setIsCaptured(false);
   };
 
@@ -297,6 +321,9 @@ export default function Home() {
       setCount(null);
       setSavedFileName(null);
       setErrorMessage(null);
+      
+      setPredictions([]);
+      setImageSize(null);
 
       const urlRes = await fetch(
         "/api/upload-url",
@@ -322,7 +349,7 @@ export default function Home() {
         {
           method: "PUT",
           headers: {
-            "Content-Type": "image/png",
+            "Content-Type": "image/jpeg",
           },
           body: capturedBlob,
         }
@@ -367,6 +394,15 @@ export default function Home() {
       if (typeof result.count === "number") {
         setCount(result.count);
       }
+      
+      if (result.predictions) {
+        setPredictions(result.predictions);
+      }
+      
+      if (result.image) {
+        setImageSize(result.image);
+      }
+
     } catch (error) {
       setErrorMessage(
         error instanceof Error
@@ -403,6 +439,8 @@ export default function Home() {
           isCaptured={isCaptured}
           capturedImage={capturedImage}
           videoRef={videoRef}
+          predictions={predictions}
+          imageSize={imageSize}
         />
 
         <StatusDisplay

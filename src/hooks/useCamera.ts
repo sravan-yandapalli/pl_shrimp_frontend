@@ -1,3 +1,5 @@
+"use client";
+
 import {
   useState,
   useRef,
@@ -274,19 +276,6 @@ export function useCamera() {
     [stopCamera]
   );
 
-  /**
-   * Process an ImageCapture still photo.
-   *
-   * IMPORTANT:
-   * We keep ImageCapture.takePhoto() for high-resolution capture.
-   *
-   * Instead of always forcing a square crop, we crop the
-   * high-resolution still to the SAME ASPECT RATIO as the
-   * live camera video.
-   *
-   * This prevents the captured image from appearing to zoom
-   * in/out or change framing after the user presses Capture.
-   */
   const processStillPhoto = useCallback(
     async (
       photoBlob: Blob,
@@ -313,13 +302,6 @@ export function useCamera() {
 
         const video = videoRef.current;
 
-        /*
-         * Determine the aspect ratio that the user is
-         * actually seeing in the live camera.
-         *
-         * Prefer video.videoWidth/video.videoHeight.
-         * If unavailable, use the MediaStreamTrack settings.
-         */
         let targetAspectRatio =
           sourceWidth / sourceHeight;
 
@@ -349,12 +331,6 @@ export function useCamera() {
           }
         }
 
-        /*
-         * Calculate the largest crop from the high-resolution
-         * still that has the same aspect ratio as the live view.
-         *
-         * This preserves as much resolution as possible.
-         */
         let cropWidth = sourceWidth;
         let cropHeight = sourceHeight;
 
@@ -365,7 +341,6 @@ export function useCamera() {
           sourceAspectRatio >
           targetAspectRatio
         ) {
-          // Source is wider than the live view.
           cropWidth =
             Math.round(
               sourceHeight *
@@ -375,7 +350,6 @@ export function useCamera() {
           sourceAspectRatio <
           targetAspectRatio
         ) {
-          // Source is taller than the live view.
           cropHeight =
             Math.round(
               sourceWidth /
@@ -383,13 +357,6 @@ export function useCamera() {
             );
         }
 
-        /*
-         * Center the crop.
-         *
-         * The live preview and captured image now have
-         * the same aspect ratio and therefore the same
-         * framing behavior.
-         */
         const cropX =
           Math.round(
             (sourceWidth - cropWidth) / 2
@@ -428,18 +395,12 @@ export function useCamera() {
           cropHeight
         );
 
-        /*
-         * Draw the SAME aspect-ratio crop that the user
-         * saw in the live camera.
-         */
         ctx.drawImage(
           bitmap,
-
           cropX,
           cropY,
           cropWidth,
           cropHeight,
-
           0,
           0,
           cropWidth,
@@ -448,21 +409,18 @@ export function useCamera() {
 
         bitmap.close();
 
-        /*
-         * PNG keeps the image lossless.
-         */
-const finalBlob =
-  await new Promise<Blob | null>(
-    (resolve) => {
-      canvas.toBlob(
-        (blob) => {
-          resolve(blob);
-        },
-        "image/jpeg",
-        0.90
-      );
-    }
-  );
+        const finalBlob =
+          await new Promise<Blob | null>(
+            (resolve) => {
+              canvas.toBlob(
+                (blob) => {
+                  resolve(blob);
+                },
+                "image/jpeg",
+                0.90
+              );
+            }
+          );
 
         if (!finalBlob) {
           return null;
@@ -484,43 +442,35 @@ const finalBlob =
         console.log(
           "========================================"
         );
-
         console.log(
           "[DIZIAQUA] CAPTURE METHOD:",
           method
         );
-
         console.log(
           "[DIZIAQUA] ORIGINAL PHOTO:",
           `${sourceWidth} × ${sourceHeight}`
         );
-
         console.log(
           "[DIZIAQUA] LIVE ASPECT RATIO:",
           targetAspectRatio
         );
-
         console.log(
           "[DIZIAQUA] CROP:",
           `${cropWidth} × ${cropHeight}`
         );
-
         console.log(
           "[DIZIAQUA] CROP OFFSET:",
           `x=${cropX}, y=${cropY}`
         );
-
         console.log(
           "[DIZIAQUA] FINAL MODEL IMAGE:",
           `${cropWidth} × ${cropHeight}`
         );
-
         console.log(
           "[DIZIAQUA] FINAL MEGAPIXELS:",
           megapixels.toFixed(2),
           "MP"
         );
-
         console.log(
           "========================================"
         );
@@ -564,24 +514,12 @@ const finalBlob =
       }
 
       try {
-        /*
-         * Turn torch on before capture.
-         */
         await setCameraTorch(true);
 
         await new Promise((resolve) => {
           setTimeout(resolve, 150);
         });
 
-        /*
-         * ====================================================
-         * PRIMARY METHOD:
-         * ImageCapture.takePhoto()
-         * ====================================================
-         *
-         * We KEEP this because it provides the best still
-         * image quality available from the camera.
-         */
         if (
           "ImageCapture" in window
         ) {
@@ -614,15 +552,6 @@ const finalBlob =
                 `${maxWidth} × ${maxHeight}`
               );
 
-              /*
-               * IMPORTANT:
-               *
-               * Continue requesting the maximum native
-               * photo resolution.
-               *
-               * processStillPhoto() will then crop it to
-               * the same aspect ratio as the live video.
-               */
               if (
                 maxWidth &&
                 maxHeight
@@ -666,12 +595,6 @@ const finalBlob =
           }
         }
 
-        /*
-         * ====================================================
-         * FALLBACK:
-         * Capture directly from the live video frame.
-         * ====================================================
-         */
         console.log(
           "[DIZIAQUA] USING VIDEO/CANVAS FALLBACK"
         );
@@ -699,9 +622,6 @@ const finalBlob =
         const sourceHeight =
           video.videoHeight;
 
-        /*
-         * Keep the EXACT video aspect ratio.
-         */
         const sourceAspectRatio =
           sourceWidth /
           sourceHeight;
@@ -712,9 +632,6 @@ const finalBlob =
         let targetHeight =
           sourceHeight;
 
-        /*
-         * Keep the native video frame.
-         */
         if (
           sourceAspectRatio >
           1
@@ -753,9 +670,6 @@ const finalBlob =
           targetHeight
         );
 
-        /*
-         * Capture exactly the video frame.
-         */
         ctx.drawImage(
           video,
           0,
@@ -808,26 +722,21 @@ const finalBlob =
         console.log(
           "========================================"
         );
-
         console.log(
           "[DIZIAQUA] FALLBACK VIDEO:"
         );
-
         console.log(
           "[DIZIAQUA] VIDEO:",
           `${sourceWidth} × ${sourceHeight}`
         );
-
         console.log(
           "[DIZIAQUA] FINAL:",
           `${targetWidth} × ${targetHeight}`
         );
-
         console.log(
           "[DIZIAQUA] FINAL MP:",
           megapixels.toFixed(2)
         );
-
         console.log(
           "========================================"
         );
@@ -846,9 +755,6 @@ const finalBlob =
 
         return null;
       } finally {
-        /*
-         * Always turn torch off.
-         */
         await setCameraTorch(false);
       }
     },
