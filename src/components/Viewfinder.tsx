@@ -22,7 +22,7 @@ export default function Viewfinder({
     rounded-full
     bg-surface
     border
-    border-primary/40
+    border-primary/10
     box-border
     relative
     overflow-hidden
