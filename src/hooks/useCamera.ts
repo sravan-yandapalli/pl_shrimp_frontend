@@ -337,6 +337,7 @@ export function useCamera() {
         const sourceAspectRatio =
           sourceWidth / sourceHeight;
 
+        // 1. Match the Aspect Ratio of the Video Feed
         if (
           sourceAspectRatio >
           targetAspectRatio
@@ -357,6 +358,17 @@ export function useCamera() {
             );
         }
 
+        // ==============================================================
+        // 2. ZOOM IN (Crop tighter) to match the Video's EIS stabilization
+        // ==============================================================
+        // A zoom factor of 1.20 perfectly compensates for the 20% sensor 
+        // crop applied by modern smartphones for video stabilization.
+        const ZOOM_FACTOR = 1.20; 
+
+        cropWidth = Math.round(cropWidth / ZOOM_FACTOR);
+        cropHeight = Math.round(cropHeight / ZOOM_FACTOR);
+
+        // Center the new crop
         const cropX =
           Math.round(
             (sourceWidth - cropWidth) / 2
@@ -455,6 +467,10 @@ export function useCamera() {
           targetAspectRatio
         );
         console.log(
+          "[DIZIAQUA] ZOOM FACTOR APPLIED:",
+          `${ZOOM_FACTOR}x`
+        );
+        console.log(
           "[DIZIAQUA] CROP:",
           `${cropWidth} × ${cropHeight}`
         );
@@ -536,21 +552,11 @@ export function useCamera() {
               const capabilities =
                 await imageCapture.getPhotoCapabilities();
 
-              console.log(
-                "[DIZIAQUA] PHOTO CAPABILITIES:",
-                capabilities
-              );
-
               const maxWidth =
                 capabilities.imageWidth?.max;
 
               const maxHeight =
                 capabilities.imageHeight?.max;
-
-              console.log(
-                "[DIZIAQUA] MAX PHOTO:",
-                `${maxWidth} × ${maxHeight}`
-              );
 
               if (
                 maxWidth &&
@@ -561,13 +567,6 @@ export function useCamera() {
                     imageWidth: maxWidth,
                     imageHeight: maxHeight,
                   });
-
-                console.log(
-                  "[DIZIAQUA] NATIVE PHOTO BLOB:",
-                  photo.type,
-                  photo.size,
-                  "bytes"
-                );
 
                 const processed =
                   await processStillPhoto(
@@ -717,28 +716,6 @@ export function useCamera() {
 
         setCaptureResolution(
           resolution
-        );
-
-        console.log(
-          "========================================"
-        );
-        console.log(
-          "[DIZIAQUA] FALLBACK VIDEO:"
-        );
-        console.log(
-          "[DIZIAQUA] VIDEO:",
-          `${sourceWidth} × ${sourceHeight}`
-        );
-        console.log(
-          "[DIZIAQUA] FINAL:",
-          `${targetWidth} × ${targetHeight}`
-        );
-        console.log(
-          "[DIZIAQUA] FINAL MP:",
-          megapixels.toFixed(2)
-        );
-        console.log(
-          "========================================"
         );
 
         return {
