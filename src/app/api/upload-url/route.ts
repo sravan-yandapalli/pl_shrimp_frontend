@@ -19,19 +19,19 @@ export const dynamic = "force-dynamic";
 // ============================================================
 
 const REGION =
-  process.env.DIZIAQUA_REGION ||
+  process.env.NEXT_PUBLIC_DIZIAQUA_REGION ||
   "ap-south-1";
 
 const S3_BUCKET =
-  process.env.DIZIAQUA_S3_BUCKET ||
+  process.env.NEXT_PUBLIC_DIZIAQUA_S3_BUCKET ||
   "diziaqua-images-320698389233";
 
 const ACCESS_KEY_ID =
-  process.env.DIZIAQUA_ACCESS_KEY_ID ||
+  process.env.NEXT_PUBLIC_DIZIAQUA_ACCESS_KEY_ID ||
   "";
 
 const SECRET_ACCESS_KEY =
-  process.env.DIZIAQUA_SECRET_ACCESS_KEY ||
+  process.env.NEXT_PUBLIC_DIZIAQUA_SECRET_ACCESS_KEY ||
   "";
 
 // ============================================================
