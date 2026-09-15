@@ -9,43 +9,92 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
+// ============================================================
+// CONFIGURATION
+// ============================================================
+
 const REGION =
-  process.env.AWS_REGION ||
-  process.env.NEXT_PUBLIC_DIZIAQUA_REGION ||
+  process.env.DIZIAQUA_REGION ||
   "ap-south-1";
 
+const ACCESS_KEY_ID =
+  process.env.DIZIAQUA_ACCESS_KEY_ID ||
+  "";
+
+const SECRET_ACCESS_KEY =
+  process.env.DIZIAQUA_SECRET_ACCESS_KEY ||
+  "";
+
 const ENDPOINT_NAME =
+  process.env.SAGEMAKER_ENDPOINT_NAME ||
   "shrimp-yolo-v2-prod";
 
-/*
- * Server-side AWS client.
- *
- * Credentials are resolved by the AWS SDK provider chain.
- *
- * Supported environment variables include:
- *
- * AWS_ACCESS_KEY_ID
- * AWS_SECRET_ACCESS_KEY
- * AWS_SESSION_TOKEN
- *
- * Do not use NEXT_PUBLIC_* secret credentials here.
- */
+// ============================================================
+// SAGEMAKER CLIENT
+// ============================================================
+
 const smClient =
   new SageMakerRuntimeClient({
     region: REGION,
+
+    credentials: {
+      accessKeyId:
+        ACCESS_KEY_ID,
+
+      secretAccessKey:
+        SECRET_ACCESS_KEY,
+    },
   });
 
+// ============================================================
+// GET
+// ============================================================
+
 export async function GET() {
-  const start = Date.now();
+  const start =
+    Date.now();
 
   try {
     console.log(
       "[DIZIAQUA] Starting SageMaker warm-up...",
     );
 
-    const payload = JSON.stringify({
-      warmup: true,
-    });
+    console.log(
+      "[DIZIAQUA] SageMaker configuration:",
+      {
+        region:
+          REGION,
+
+        endpoint:
+          ENDPOINT_NAME,
+      },
+    );
+
+    // --------------------------------------------------------
+    // VALIDATE CREDENTIALS
+    // --------------------------------------------------------
+
+    if (
+      !ACCESS_KEY_ID ||
+      !SECRET_ACCESS_KEY
+    ) {
+      throw new Error(
+        "DIZIAQUA AWS credentials are missing.",
+      );
+    }
+
+    // --------------------------------------------------------
+    // WARMUP PAYLOAD
+    // --------------------------------------------------------
+
+    const payload =
+      JSON.stringify({
+        warmup: true,
+      });
+
+    // --------------------------------------------------------
+    // INVOKE SAGEMAKER
+    // --------------------------------------------------------
 
     const response =
       await smClient.send(
@@ -59,20 +108,34 @@ export async function GET() {
           Accept:
             "application/json",
 
-          Body: Buffer.from(
-            payload,
-          ),
+          Body:
+            Buffer.from(
+              payload,
+            ),
         }),
       );
 
+    // --------------------------------------------------------
+    // READ RESPONSE
+    // --------------------------------------------------------
+
     const responseText =
       response.Body
-        ? Buffer.from(
-            response.Body,
-          ).toString("utf-8")
+        ? Buffer
+            .from(
+              response.Body,
+            )
+            .toString(
+              "utf-8",
+            )
         : "";
 
-    let result: unknown = null;
+    // --------------------------------------------------------
+    // PARSE RESPONSE
+    // --------------------------------------------------------
+
+    let result: unknown =
+      null;
 
     if (responseText) {
       try {
@@ -81,36 +144,53 @@ export async function GET() {
             responseText,
           );
       } catch {
-        result = responseText;
+        result =
+          responseText;
       }
     }
 
     const elapsed =
-      Date.now() - start;
+      Date.now() -
+      start;
+
+    // --------------------------------------------------------
+    // SUCCESS LOG
+    // --------------------------------------------------------
 
     console.log(
       "[DIZIAQUA] SageMaker warm-up completed",
       {
         endpoint:
           ENDPOINT_NAME,
+
         elapsedMs:
           elapsed,
+
         result,
       },
     );
 
+    // --------------------------------------------------------
+    // RESPONSE
+    // --------------------------------------------------------
+
     return NextResponse.json({
       success: true,
+
       warm: true,
+
       endpoint:
         ENDPOINT_NAME,
+
       processingTimeMs:
         elapsed,
+
       result,
     });
   } catch (error) {
     const elapsed =
-      Date.now() - start;
+      Date.now() -
+      start;
 
     const message =
       error instanceof Error
@@ -125,10 +205,14 @@ export async function GET() {
     return NextResponse.json(
       {
         success: false,
+
         warm: false,
+
         endpoint:
           ENDPOINT_NAME,
+
         message,
+
         processingTimeMs:
           elapsed,
       },
