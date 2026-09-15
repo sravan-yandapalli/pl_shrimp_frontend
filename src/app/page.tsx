@@ -1,9 +1,13 @@
 "use client";
 
 import {
-  useState,
   useEffect,
   useRef,
+  useState,
+} from "react";
+
+import type {
+  ChangeEvent,
 } from "react";
 
 import Image from "next/image";
@@ -44,68 +48,39 @@ export default function Home() {
     setIsCaptured,
   ] = useState(false);
 
-  /**
-   * Local captured/uploaded image.
-   */
   const [
     capturedImage,
     setCapturedImage,
   ] = useState<string | null>(null);
 
-  /**
-   * Image blob which is uploaded to S3.
-   */
   const [
     capturedBlob,
     setCapturedBlob,
   ] = useState<Blob | null>(null);
 
-  /**
-   * Processing indicator.
-   */
   const [
     isProcessing,
     setIsProcessing,
   ] = useState(false);
 
-  /**
-   * Shrimp count.
-   */
   const [
     count,
     setCount,
   ] = useState<number | null>(null);
 
-  /**
-   * Original uploaded file name.
-   */
   const [
     savedFileName,
     setSavedFileName,
   ] = useState<string | null>(null);
 
-  /**
-   * ==========================================================
-   * IMPORTANT
-   *
-   * Presigned URL for:
-   *
-   * annotated/counted_xxxxxxxx.jpg
-   *
-   * This is returned by /api/count.
-   * ==========================================================
-   */
   const [
     annotatedImageUrl,
     setAnnotatedImageUrl,
   ] = useState<string | null>(null);
 
-  /**
-   * Camera click audio.
-   */
   const cameraClickRef =
     useRef<HTMLAudioElement | null>(
-      null
+      null,
     );
 
   // ============================================================
@@ -116,17 +91,31 @@ export default function Home() {
     const warmUpEndpoint =
       async () => {
         try {
-          await fetch(
-            "/api/warmup"
-          );
+          const response =
+            await fetch(
+              "/api/warmup",
+              {
+                method: "GET",
+                cache: "no-store",
+              },
+            );
+
+          if (!response.ok) {
+            console.warn(
+              "[DIZIAQUA] SageMaker warm-up returned:",
+              response.status,
+            );
+
+            return;
+          }
 
           console.log(
-            "[DIZIAQUA] SageMaker warm-up signal sent."
+            "[DIZIAQUA] SageMaker warm-up signal sent.",
           );
         } catch (error) {
           console.warn(
             "[DIZIAQUA] Warm-up ping failed:",
-            error
+            error,
           );
         }
       };
@@ -184,23 +173,23 @@ export default function Home() {
 
     document.addEventListener(
       "visibilitychange",
-      handleVisibilityChange
+      handleVisibilityChange,
     );
 
     window.addEventListener(
       "pageshow",
-      handlePageShow
+      handlePageShow,
     );
 
     return () => {
       document.removeEventListener(
         "visibilitychange",
-        handleVisibilityChange
+        handleVisibilityChange,
       );
 
       window.removeEventListener(
         "pageshow",
-        handlePageShow
+        handlePageShow,
       );
     };
   }, [
@@ -216,7 +205,7 @@ export default function Home() {
   useEffect(() => {
     const audio =
       new Audio(
-        "/sounds/camera-click.mp3"
+        "/sounds/camera-click.mp3",
       );
 
     audio.preload = "auto";
@@ -241,10 +230,12 @@ export default function Home() {
     return () => {
       if (
         capturedImage &&
-        capturedImage.startsWith("blob:")
+        capturedImage.startsWith(
+          "blob:",
+        )
       ) {
         URL.revokeObjectURL(
-          capturedImage
+          capturedImage,
         );
       }
     };
@@ -263,9 +254,9 @@ export default function Home() {
         return;
       }
 
-      // --------------------------------------------------------
+      // ----------------------------------------------------------
       // CAMERA SOUND
-      // --------------------------------------------------------
+      // ----------------------------------------------------------
 
       const audio =
         cameraClickRef.current;
@@ -279,54 +270,52 @@ export default function Home() {
         }
       }
 
-      // --------------------------------------------------------
-      // REMOVE OLD LOCAL IMAGE
-      // --------------------------------------------------------
+      // ----------------------------------------------------------
+      // REMOVE OLD IMAGE
+      // ----------------------------------------------------------
 
       if (
         capturedImage &&
-        capturedImage.startsWith("blob:")
+        capturedImage.startsWith(
+          "blob:",
+        )
       ) {
         URL.revokeObjectURL(
-          capturedImage
+          capturedImage,
         );
       }
 
-      // --------------------------------------------------------
-      // SAVE NEW CAPTURE
-      // --------------------------------------------------------
+      // ----------------------------------------------------------
+      // SAVE CAPTURE
+      // ----------------------------------------------------------
 
       setCapturedImage(
-        result.url
+        result.url,
       );
 
       setCapturedBlob(
-        result.blob
+        result.blob,
       );
 
-      // --------------------------------------------------------
+      // ----------------------------------------------------------
       // CLEAR PREVIOUS RESULT
-      // --------------------------------------------------------
+      // ----------------------------------------------------------
 
       setAnnotatedImageUrl(
-        null
+        null,
       );
 
-      setCount(
-        null
-      );
+      setCount(null);
 
       setSavedFileName(
-        null
+        null,
       );
 
       setErrorMessage(
-        null
+        null,
       );
 
-      setIsCaptured(
-        true
-      );
+      setIsCaptured(true);
 
       stopCamera();
     };
@@ -335,78 +324,78 @@ export default function Home() {
   // UPLOAD EXISTING IMAGE
   // ============================================================
 
-  const handleUpload = (
-    event: React.ChangeEvent<HTMLInputElement>
-  ) => {
-    const file =
-      event.target.files?.[0];
+  const handleUpload =
+    (
+      event: ChangeEvent<HTMLInputElement>,
+    ) => {
+      const file =
+        event.target.files?.[0];
 
-    if (!file) {
-      return;
-    }
+      if (!file) {
+        return;
+      }
 
-    // ----------------------------------------------------------
-    // VALIDATE FILE
-    // ----------------------------------------------------------
+      // ----------------------------------------------------------
+      // VALIDATE FILE
+      // ----------------------------------------------------------
 
-    if (
-      !file.type.startsWith(
-        "image/"
-      )
-    ) {
-      setErrorMessage(
-        "Please select an image file."
-      );
+      if (
+        !file.type.startsWith(
+          "image/",
+        )
+      ) {
+        setErrorMessage(
+          "Please select an image file.",
+        );
 
-      event.target.value = "";
+        event.target.value = "";
 
-      return;
-    }
+        return;
+      }
 
-    setErrorMessage(null);
+      setErrorMessage(null);
+      setCount(null);
+      setSavedFileName(null);
+      setAnnotatedImageUrl(null);
 
-    setCount(null);
+      // ----------------------------------------------------------
+      // LOAD IMAGE
+      // ----------------------------------------------------------
 
-    setSavedFileName(null);
+      const image =
+        new window.Image();
 
-    setAnnotatedImageUrl(null);
+      const imageUrl =
+        URL.createObjectURL(
+          file,
+        );
 
-    // ----------------------------------------------------------
-    // LOAD IMAGE
-    // ----------------------------------------------------------
-
-    const image =
-      new window.Image();
-
-    const imageUrl =
-      URL.createObjectURL(
-        file
-      );
-
-    image.onload =
-      () => {
+      image.onload = () => {
         const canvas =
           canvasRef.current;
 
         if (!canvas) {
           URL.revokeObjectURL(
-            imageUrl
+            imageUrl,
           );
 
-          event.target.value =
-            "";
+          event.target.value = "";
+
+          setErrorMessage(
+            "Could not process the selected image.",
+          );
 
           return;
         }
 
-        // ------------------------------------------------------
+        // --------------------------------------------------------
         // CENTER CROP TO SQUARE
-        // ------------------------------------------------------
+        // --------------------------------------------------------
 
         const sourceSize =
           Math.min(
             image.naturalWidth,
-            image.naturalHeight
+            image.naturalHeight,
           );
 
         const sourceStartX =
@@ -429,19 +418,18 @@ export default function Home() {
 
         const ctx =
           canvas.getContext(
-            "2d"
+            "2d",
           );
 
         if (!ctx) {
           URL.revokeObjectURL(
-            imageUrl
+            imageUrl,
           );
 
-          event.target.value =
-            "";
+          event.target.value = "";
 
           setErrorMessage(
-            "Could not process the selected image."
+            "Could not process the selected image.",
           );
 
           return;
@@ -457,42 +445,44 @@ export default function Home() {
           0,
           0,
           sourceSize,
-          sourceSize
+          sourceSize,
         );
 
         ctx.drawImage(
           image,
-
           sourceStartX,
           sourceStartY,
-
           sourceSize,
           sourceSize,
-
           0,
           0,
-
           sourceSize,
-          sourceSize
+          sourceSize,
         );
 
-        // ------------------------------------------------------
-        // CREATE PNG BLOB
-        // ------------------------------------------------------
+        // --------------------------------------------------------
+        // CONVERT UPLOADED IMAGE TO JPEG
+        // --------------------------------------------------------
+        //
+        // This is intentional.
+        //
+        // Your S3 route signs image/jpeg for camera captures.
+        // Converting uploaded images here means both camera and
+        // gallery uploads use the same JPEG pipeline.
+        //
 
         canvas.toBlob(
           (blob) => {
             URL.revokeObjectURL(
-              imageUrl
+              imageUrl,
             );
 
             if (!blob) {
               setErrorMessage(
-                "Could not create PNG."
+                "Could not create JPEG.",
               );
 
-              event.target.value =
-                "";
+              event.target.value = "";
 
               return;
             }
@@ -500,66 +490,70 @@ export default function Home() {
             if (
               capturedImage &&
               capturedImage.startsWith(
-                "blob:"
+                "blob:",
               )
             ) {
               URL.revokeObjectURL(
-                capturedImage
+                capturedImage,
               );
             }
 
             const previewUrl =
               URL.createObjectURL(
-                blob
+                blob,
               );
 
             setCapturedImage(
-              previewUrl
+              previewUrl,
             );
 
             setCapturedBlob(
-              blob
+              blob,
             );
 
             setAnnotatedImageUrl(
-              null
+              null,
+            );
+
+            setCount(null);
+
+            setSavedFileName(
+              null,
             );
 
             setIsCaptured(
-              true
+              true,
             );
 
             setErrorMessage(
-              null
+              null,
             );
 
             stopCamera();
 
-            event.target.value =
-              "";
+            event.target.value = "";
           },
-
-          "image/png"
+          "image/jpeg",
+          0.98,
         );
       };
 
-    image.onerror =
-      () => {
-        URL.revokeObjectURL(
-          imageUrl
-        );
+      image.onerror =
+        () => {
+          URL.revokeObjectURL(
+            imageUrl,
+          );
 
-        event.target.value =
-          "";
+          event.target.value = "";
 
-        setErrorMessage(
-          "Could not load the selected image."
-        );
-      };
+          setErrorMessage(
+            "Could not load the selected image.",
+          );
+        };
 
-    image.src =
-      imageUrl;
-  };
+      image.src =
+        imageUrl;
+    };
 
   // ============================================================
   // RECAPTURE
@@ -570,41 +564,27 @@ export default function Home() {
       if (
         capturedImage &&
         capturedImage.startsWith(
-          "blob:"
+          "blob:",
         )
       ) {
         URL.revokeObjectURL(
-          capturedImage
+          capturedImage,
         );
       }
 
-      setCapturedImage(
-        null
-      );
+      setCapturedImage(null);
 
-      setCapturedBlob(
-        null
-      );
+      setCapturedBlob(null);
 
-      setAnnotatedImageUrl(
-        null
-      );
+      setAnnotatedImageUrl(null);
 
-      setCount(
-        null
-      );
+      setCount(null);
 
-      setSavedFileName(
-        null
-      );
+      setSavedFileName(null);
 
-      setErrorMessage(
-        null
-      );
+      setErrorMessage(null);
 
-      setIsCaptured(
-        false
-      );
+      setIsCaptured(false);
     };
 
   // ============================================================
@@ -615,44 +595,41 @@ export default function Home() {
     async () => {
       if (!capturedBlob) {
         setErrorMessage(
-          "No captured image available."
+          "No captured image available.",
         );
 
         return;
       }
 
       try {
-        // ------------------------------------------------------
+        // --------------------------------------------------------
         // START PROCESSING
-        // ------------------------------------------------------
+        // --------------------------------------------------------
 
-        setIsProcessing(
-          true
-        );
+        setIsProcessing(true);
 
-        setCount(
-          null
-        );
+        setCount(null);
 
-        setSavedFileName(
-          null
-        );
+        setSavedFileName(null);
 
-        setAnnotatedImageUrl(
-          null
-        );
+        setAnnotatedImageUrl(null);
 
-        setErrorMessage(
-          null
-        );
+        setErrorMessage(null);
 
-        // ======================================================
+        // ========================================================
         // STEP 1
-        // GET PRESIGNED UPLOAD URL
-        // ======================================================
+        // GET PRESIGNED URL
+        // ========================================================
+
+        const contentType =
+          capturedBlob.type ||
+          "image/jpeg";
 
         console.log(
-          "[DIZIAQUA] Requesting upload URL..."
+          "[DIZIAQUA] Requesting upload URL...",
+          {
+            contentType,
+          },
         );
 
         const urlRes =
@@ -660,7 +637,15 @@ export default function Home() {
             "/api/upload-url",
             {
               method: "POST",
-            }
+              headers: {
+                "Content-Type":
+                  "application/json",
+              },
+              cache: "no-store",
+              body: JSON.stringify({
+                contentType,
+              }),
+            },
           );
 
         if (!urlRes.ok) {
@@ -669,7 +654,7 @@ export default function Home() {
 
           throw new Error(
             "Could not get secure upload link from server. " +
-              text
+              text,
           );
         }
 
@@ -685,142 +670,147 @@ export default function Home() {
         const bucket =
           uploadData.bucket;
 
+        const signedContentType =
+          uploadData.contentType ||
+          contentType;
+
         if (
           !uploadUrl ||
           !key ||
           !bucket
         ) {
           throw new Error(
-            "Invalid upload URL response."
+            "Invalid upload URL response.",
           );
         }
 
         console.log(
           "[DIZIAQUA] Upload key:",
-          key
+          key,
         );
 
-        // ======================================================
+        console.log(
+          "[DIZIAQUA] Upload content type:",
+          signedContentType,
+        );
+
+        // ========================================================
         // STEP 2
         // UPLOAD TO S3
-        // ======================================================
+        // ========================================================
 
         const uploadRes =
           await fetch(
             uploadUrl,
             {
               method: "PUT",
-
-              /**
-               * Keep this consistent with your current
-               * upload-url signing route.
-               */
               headers: {
                 "Content-Type":
-                  "image/jpeg",
+                  signedContentType,
               },
-
-              body:
-                capturedBlob,
-            }
+              body: capturedBlob,
+            },
           );
 
         if (!uploadRes.ok) {
+          const uploadError =
+            await uploadRes.text();
+
+          console.error(
+            "[DIZIAQUA] S3 upload response:",
+            uploadError,
+          );
+
           throw new Error(
-            `Failed to upload image. Status: ${uploadRes.status}`
+            `Failed to upload image. Status: ${uploadRes.status}. ${uploadError}`,
           );
         }
 
         console.log(
-          "[DIZIAQUA] Image uploaded successfully."
+          "[DIZIAQUA] Image uploaded successfully.",
         );
 
-        // ======================================================
+        // ========================================================
         // STEP 3
         // SEND IMAGE TO COUNTING API
-        // ======================================================
+        // ========================================================
 
-        /**
-         * We use /api/capture here for compatibility.
-         *
-         * /api/capture forwards to /api/count.
-         */
         const processRes =
           await fetch(
             "/api/capture",
             {
               method: "POST",
-
               headers: {
                 "Content-Type":
                   "application/json",
               },
-
-              body:
-                JSON.stringify({
-                  bucket,
-                  key,
-                }),
-            }
+              body: JSON.stringify({
+                bucket,
+                key,
+              }),
+            },
           );
 
-        // ------------------------------------------------------
+        // --------------------------------------------------------
         // READ RESPONSE
-        // ------------------------------------------------------
+        // --------------------------------------------------------
 
         const result =
           await processRes.json();
 
         console.log(
           "[DIZIAQUA] COUNT RESULT:",
-          result
+          result,
         );
 
-        // ======================================================
+        // --------------------------------------------------------
         // CHECK HTTP STATUS
-        // ======================================================
+        // --------------------------------------------------------
 
         if (!processRes.ok) {
           throw new Error(
             result.message ||
-            result.error ||
-            "Failed to process image."
+              result.error ||
+              "Failed to process image.",
           );
         }
 
-        // ======================================================
+        // --------------------------------------------------------
         // CHECK SUCCESS
-        // ======================================================
+        // --------------------------------------------------------
 
         if (
-          result.success !==
-          true
+          result.success !== true
         ) {
           throw new Error(
             result.message ||
-            "Image processing failed."
+              "Image processing failed.",
           );
         }
 
-        // ======================================================
+        // ========================================================
         // STEP 4
         // SAVE FILE NAME
-        // ======================================================
+        // ========================================================
+
+        const fallbackFileName =
+          typeof key === "string"
+            ? key
+                .split("/")
+                .pop() || key
+            : null;
 
         setSavedFileName(
           typeof result.fileName ===
             "string"
             ? result.fileName
-            : key
-              ?.split("/")
-              .pop() ||
-              key
+            : fallbackFileName,
         );
 
-        // ======================================================
+        // ========================================================
         // STEP 5
         // SAVE COUNT
-        // ======================================================
+        // ========================================================
 
         const finalCount =
           result.count ??
@@ -831,26 +821,14 @@ export default function Home() {
           "number"
         ) {
           setCount(
-            finalCount
+            finalCount,
           );
         }
 
-        // ======================================================
+        // ========================================================
         // STEP 6
         // SAVE ANNOTATED IMAGE
-        // ======================================================
-
-        /**
-         * Current API returns:
-         *
-         *     annotatedImageUrl
-         *
-         * and the alternate field:
-         *
-         *     imageUrl
-         *
-         * Support both.
-         */
+        // ========================================================
 
         const finalAnnotatedUrl =
           result.annotatedImageUrl ||
@@ -865,43 +843,36 @@ export default function Home() {
         ) {
           console.error(
             "[DIZIAQUA] No annotated image URL received.",
-            result
+            result,
           );
 
           throw new Error(
-            "Count completed, but annotated image URL was not returned."
+            "Count completed, but annotated image URL was not returned.",
           );
         }
 
         console.log(
-          "[DIZIAQUA] Annotated image URL received:"
+          "[DIZIAQUA] Annotated image URL received:",
+          finalAnnotatedUrl,
         );
 
-        console.log(
-          finalAnnotatedUrl
-        );
-
-        /**
-         * THIS IS THE KEY FIX.
-         */
         setAnnotatedImageUrl(
-          finalAnnotatedUrl
+          finalAnnotatedUrl,
         );
-
       } catch (error) {
         console.error(
           "[DIZIAQUA] Processing error:",
-          error
+          error,
         );
 
         setErrorMessage(
           error instanceof Error
             ? error.message
-            : "Failed to process image."
+            : "Failed to process image.",
         );
       } finally {
         setIsProcessing(
-          false
+          false,
         );
       }
     };
@@ -912,9 +883,7 @@ export default function Home() {
 
   return (
     <>
-      {/* ========================================================
-          HIDDEN CANVAS
-      ======================================================== */}
+      {/* HIDDEN CANVAS */}
 
       <canvas
         ref={canvasRef}
@@ -923,29 +892,10 @@ export default function Home() {
         }}
       />
 
-      {/* ========================================================
-          MAIN PAGE
-      ======================================================== */}
+      {/* MAIN PAGE */}
 
-      <div
-        className="
-          w-full
-          h-[calc(100dvh-60px)]
-          overflow-hidden
-          flex
-          flex-col
-          items-center
-          justify-between
-          pt-6
-          pb-15
-          select-none
-          bg-background
-        "
-      >
-
-        {/* ======================================================
-            INSTRUCTIONS
-        ====================================================== */}
+      <div className="w-full h-[calc(100dvh-60px)] overflow-hidden flex flex-col items-center justify-between pt-6 pb-15 select-none bg-background">
+        {/* INSTRUCTIONS */}
 
         <div>
           <Image
@@ -953,96 +903,76 @@ export default function Home() {
             alt="instructions"
             width={310}
             height={100}
+            style={{
+              width: "310px",
+              height: "auto",
+            }}
             priority
           />
         </div>
 
-        {/* ======================================================
-            VIEWFINDER
-        ====================================================== */}
+        {/* VIEWFINDER */}
 
         <Viewfinder
           isCaptured={
             isCaptured
           }
-
           capturedImage={
             capturedImage
           }
-
-          /**
-           * IMPORTANT:
-           * This is the presigned S3 URL returned by the API.
-           */
           annotatedImageUrl={
             annotatedImageUrl
           }
-
           videoRef={
             videoRef
           }
         />
 
-        {/* ======================================================
-            STATUS
-        ====================================================== */}
+        {/* STATUS */}
 
         <StatusDisplay
           isProcessing={
             isProcessing
           }
-
           count={
             count
           }
-
           savedFileName={
             savedFileName
           }
-
           errorMessage={
             errorMessage
           }
-
           captureResolution={
             captureResolution
           }
         />
 
-        {/* ======================================================
-            CONTROLS
-        ====================================================== */}
+        {/* CONTROLS */}
 
         <CaptureControls
           isCaptured={
             isCaptured
           }
-
           cameraReady={
             cameraReady
           }
-
           isProcessing={
             isProcessing
           }
-
           onCapture={
             handleCapture
           }
-
           onUpload={
             handleUpload
           }
-
           onRecapture={
             handleRecapture
           }
-
           onSubmit={
             handleSubmit
           }
         />
-
       </div>
     </>
   );

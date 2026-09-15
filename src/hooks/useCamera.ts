@@ -1,10 +1,10 @@
 "use client";
 
 import {
-  useState,
-  useRef,
   useCallback,
   useEffect,
+  useRef,
+  useState,
 } from "react";
 
 // ============================================================
@@ -15,33 +15,17 @@ export interface CaptureResolution {
   width: number;
   height: number;
   megapixels: number;
-  method: "ImageCapture" | "Video fallback";
+  method:
+    | "ImageCapture"
+    | "Video fallback";
   sourceWidth?: number;
   sourceHeight?: number;
 }
 
 // ============================================================
-// CAMERA / PREVIEW CONFIGURATION
+// IMAGE QUALITY
 // ============================================================
 
-/**
- * Visual zoom used by the live preview.
- *
- * The exact same framing is applied to the captured image.
- *
- * 1.00 = no zoom
- * 1.05 = 5% zoom
- * 1.10 = 10% zoom
- * 1.15 = 15% zoom
- */
-const PREVIEW_ZOOM = 1.10;
-
-/**
- * JPEG quality.
- *
- * 0.98 gives very high quality while keeping the file
- * smaller than a lossless/near-lossless format.
- */
 const JPEG_QUALITY = 0.98;
 
 // ============================================================
@@ -49,10 +33,6 @@ const JPEG_QUALITY = 0.98;
 // ============================================================
 
 export function useCamera() {
-  // ==========================================================
-  // STATE
-  // ==========================================================
-
   const [
     cameraReady,
     setCameraReady,
@@ -66,9 +46,10 @@ export function useCamera() {
   const [
     captureResolution,
     setCaptureResolution,
-  ] = useState<CaptureResolution | null>(
-    null
-  );
+  ] =
+    useState<CaptureResolution | null>(
+      null
+    );
 
   // ==========================================================
   // REFS
@@ -168,7 +149,7 @@ export function useCamera() {
             try {
               track.stop();
             } catch {
-              // Ignore stop errors.
+              // Ignore.
             }
           });
       }
@@ -181,8 +162,7 @@ export function useCamera() {
 
       if (video) {
         video.pause();
-        video.srcObject =
-          null;
+        video.srcObject = null;
         video.onloadedmetadata =
           null;
       }
@@ -197,7 +177,6 @@ export function useCamera() {
   const startCamera =
     useCallback(
       async (): Promise<boolean> => {
-
         if (startingRef.current) {
           return false;
         }
@@ -212,13 +191,10 @@ export function useCamera() {
 
         try {
           setErrorMessage(null);
-
-          setCaptureResolution(
-            null
-          );
+          setCaptureResolution(null);
 
           // --------------------------------------------------
-          // CAMERA SUPPORT
+          // CHECK BROWSER SUPPORT
           // --------------------------------------------------
 
           if (
@@ -241,7 +217,11 @@ export function useCamera() {
           }
 
           // --------------------------------------------------
-          // REQUEST HIGH RESOLUTION CAMERA
+          // CAMERA REQUEST
+          //
+          // No zoom.
+          // No crop.
+          // No 300x300 constraint.
           // --------------------------------------------------
 
           const stream =
@@ -249,8 +229,7 @@ export function useCamera() {
               .getUserMedia({
                 video: {
                   facingMode: {
-                    ideal:
-                      "environment",
+                    ideal: "environment",
                   },
 
                   width: {
@@ -273,7 +252,7 @@ export function useCamera() {
             stream;
 
           // --------------------------------------------------
-          // CAMERA DETAILS
+          // CAMERA INFORMATION
           // --------------------------------------------------
 
           const track =
@@ -306,8 +285,11 @@ export function useCamera() {
             }
 
             console.log(
-              "[DIZIAQUA] PREVIEW ZOOM:",
-              `${PREVIEW_ZOOM}x`
+              "[DIZIAQUA] DIGITAL ZOOM: NONE"
+            );
+
+            console.log(
+              "[DIZIAQUA] CAPTURE CROP: ONLY PREVIEW AREA"
             );
 
             console.log(
@@ -316,7 +298,7 @@ export function useCamera() {
           }
 
           // --------------------------------------------------
-          // CONNECT STREAM
+          // ATTACH STREAM
           // --------------------------------------------------
 
           video.srcObject =
@@ -329,7 +311,7 @@ export function useCamera() {
             true;
 
           // --------------------------------------------------
-          // WAIT FOR METADATA
+          // WAIT FOR VIDEO METADATA
           // --------------------------------------------------
 
           await new Promise<void>(
@@ -337,11 +319,10 @@ export function useCamera() {
               resolve,
               reject
             ) => {
-
               if (!video) {
                 reject(
                   new Error(
-                    "Camera video element unavailable."
+                    "Video element unavailable."
                   )
                 );
 
@@ -368,12 +349,10 @@ export function useCamera() {
                 handleLoadedMetadata;
 
               setTimeout(() => {
-
                 if (
                   video.readyState >=
                   HTMLMediaElement.HAVE_METADATA
                 ) {
-
                   video.onloadedmetadata =
                     null;
 
@@ -384,13 +363,16 @@ export function useCamera() {
           );
 
           // --------------------------------------------------
-          // START PLAYBACK
+          // PLAY
           // --------------------------------------------------
 
           await video.play();
 
-          setCameraReady(
-            true
+          setCameraReady(true);
+
+          console.log(
+            "[DIZIAQUA] LIVE VIDEO FRAME:",
+            `${video.videoWidth} × ${video.videoHeight}`
           );
 
           return true;
@@ -410,20 +392,17 @@ export function useCamera() {
           if (
             error instanceof DOMException
           ) {
-
             if (
               error.name ===
               "NotAllowedError"
             ) {
-
               message =
-                "Camera permission was denied. Please allow camera access in your browser settings.";
+                "Camera permission was denied. Please allow camera access.";
 
             } else if (
               error.name ===
               "NotFoundError"
             ) {
-
               message =
                 "No camera was found on this device.";
 
@@ -431,23 +410,20 @@ export function useCamera() {
               error.name ===
               "NotReadableError"
             ) {
-
               message =
-                "The camera is currently being used by another app.";
+                "The camera is currently being used by another application.";
 
             } else if (
               error.name ===
               "SecurityError"
             ) {
-
               message =
-                "Camera access is blocked. Please use the website over HTTPS.";
+                "Camera access is blocked. Please use HTTPS.";
 
             } else if (
               error.name ===
               "OverconstrainedError"
             ) {
-
               message =
                 "The camera does not support the requested settings.";
             }
@@ -468,27 +444,92 @@ export function useCamera() {
     );
 
   // ==========================================================
-  // PROCESS STILL PHOTO
+  // CROP EXACT PREVIEW AREA
+  //
+  // UI viewfinder = 300x300 square.
+  //
+  // object-cover therefore displays the largest CENTER square
+  // from the camera frame.
+  //
+  // Example:
+  //
+  // Camera = 1920x1080
+  //
+  // Preview visible source area = 1080x1080
+  //
+  // This function returns EXACTLY that source area.
+  // ==========================================================
+
+  const getPreviewCrop =
+    useCallback(
+      (
+        width: number,
+        height: number
+      ) => {
+
+        const viewfinderAspect =
+          1;
+
+        const cameraAspect =
+          width / height;
+
+        let cropWidth =
+          width;
+
+        let cropHeight =
+          height;
+
+        if (
+          cameraAspect >
+          viewfinderAspect
+        ) {
+          // Wider than square.
+          cropWidth =
+            height;
+        } else if (
+          cameraAspect <
+          viewfinderAspect
+        ) {
+          // Taller than square.
+          cropHeight =
+            width;
+        }
+
+        const sourceX =
+          Math.round(
+            (width -
+              cropWidth) /
+              2
+          );
+
+        const sourceY =
+          Math.round(
+            (height -
+              cropHeight) /
+              2
+          );
+
+        return {
+          sourceX,
+          sourceY,
+          cropWidth,
+          cropHeight,
+        };
+      },
+      []
+    );
+
+  // ==========================================================
+  // PROCESS IMAGECAPTURE PHOTO
   //
   // IMPORTANT:
-  //
-  // Camera still photo:
-  //   maximum resolution
-  //   ↓
-  // center square crop
-  //   ↓
-  // same 1.10x framing as preview
-  //   ↓
-  // JPEG quality 0.98
+  // Preserve the exact preview area at FULL resolution.
   // ==========================================================
 
   const processStillPhoto =
     useCallback(
       async (
-        photoBlob: Blob,
-        method:
-          | "ImageCapture"
-          | "Video fallback"
+        photoBlob: Blob
       ): Promise<{
         blob: Blob;
         url: string;
@@ -496,7 +537,6 @@ export function useCamera() {
       } | null> => {
 
         try {
-
           const bitmap =
             await createImageBitmap(
               photoBlob
@@ -516,76 +556,31 @@ export function useCamera() {
             return null;
           }
 
-          // ==================================================
-          // STEP 1
-          // MATCH THE CIRCULAR VIEWFINDER
-          //
-          // Viewfinder is 300 x 300.
-          // Therefore use a square crop.
-          // ==================================================
+          // --------------------------------------------------
+          // SAME CROP AS 300x300 PREVIEW
+          // --------------------------------------------------
 
-          const squareSize =
-            Math.min(
+          const {
+            sourceX,
+            sourceY,
+            cropWidth,
+            cropHeight,
+          } =
+            getPreviewCrop(
               sourceWidth,
               sourceHeight
             );
 
-          // ==================================================
-          // STEP 2
-          // SAME 1.10x VISUAL ZOOM
+          // --------------------------------------------------
+          // CREATE CANVAS AT ORIGINAL CROP SIZE
           //
-          // The live preview is displayed with scale-[1.10].
-          //
-          // To reproduce that framing in the real captured
-          // photo, crop to:
-          //
-          // squareSize / 1.10
-          // ==================================================
-
-          const cropWidth =
-            Math.round(
-              squareSize /
-              PREVIEW_ZOOM
-            );
-
-          const cropHeight =
-            Math.round(
-              squareSize /
-              PREVIEW_ZOOM
-            );
-
-          // ==================================================
-          // STEP 3
-          // CENTER CROP
-          // ==================================================
-
-          const cropX =
-            Math.round(
-              (
-                sourceWidth -
-                cropWidth
-              ) / 2
-            );
-
-          const cropY =
-            Math.round(
-              (
-                sourceHeight -
-                cropHeight
-              ) / 2
-            );
-
-          // ==================================================
-          // CANVAS
-          // ==================================================
+          // NOT 300x300.
+          // --------------------------------------------------
 
           const canvas =
-            canvasRef.current;
-
-          if (!canvas) {
-            bitmap.close();
-            return null;
-          }
+            document.createElement(
+              "canvas"
+            );
 
           canvas.width =
             cropWidth;
@@ -603,10 +598,6 @@ export function useCamera() {
             return null;
           }
 
-          // ==================================================
-          // HIGH QUALITY
-          // ==================================================
-
           ctx.imageSmoothingEnabled =
             true;
 
@@ -620,20 +611,18 @@ export function useCamera() {
             cropHeight
           );
 
-          // ==================================================
-          // DRAW
-          // ==================================================
+          // --------------------------------------------------
+          // COPY EXACT PREVIEW AREA
+          // --------------------------------------------------
 
           ctx.drawImage(
             bitmap,
 
-            // Source
-            cropX,
-            cropY,
+            sourceX,
+            sourceY,
             cropWidth,
             cropHeight,
 
-            // Destination
             0,
             0,
             cropWidth,
@@ -642,9 +631,9 @@ export function useCamera() {
 
           bitmap.close();
 
-          // ==================================================
-          // JPEG 0.98
-          // ==================================================
+          // --------------------------------------------------
+          // HIGH-QUALITY JPEG
+          // --------------------------------------------------
 
           const finalBlob =
             await new Promise<Blob | null>(
@@ -663,10 +652,6 @@ export function useCamera() {
             return null;
           }
 
-          // ==================================================
-          // RESOLUTION
-          // ==================================================
-
           const megapixels =
             (
               cropWidth *
@@ -676,47 +661,53 @@ export function useCamera() {
 
           const resolution:
             CaptureResolution = {
-              width:
-                cropWidth,
+            width:
+              cropWidth,
 
-              height:
-                cropHeight,
+            height:
+              cropHeight,
 
-              megapixels,
+            megapixels,
 
-              method,
+            method:
+              "ImageCapture",
 
-              sourceWidth,
-
-              sourceHeight,
-            };
-
-          // ==================================================
-          // LOGGING
-          // ==================================================
+            sourceWidth,
+            sourceHeight,
+          };
 
           console.log(
             "========================================"
           );
 
           console.log(
-            "[DIZIAQUA] CAPTURE METHOD:",
-            method
-          );
-
-          console.log(
-            "[DIZIAQUA] SOURCE:",
+            "[DIZIAQUA] STILL PHOTO:",
             `${sourceWidth} × ${sourceHeight}`
           );
 
           console.log(
-            "[DIZIAQUA] PREVIEW ZOOM:",
-            `${PREVIEW_ZOOM.toFixed(2)}x`
+            "[DIZIAQUA] EXACT PREVIEW CROP:",
+            `${cropWidth} × ${cropHeight}`
           );
 
           console.log(
-            "[DIZIAQUA] FINAL CAPTURE:",
+            "[DIZIAQUA] CROP OFFSET:",
+            `x=${sourceX}, y=${sourceY}`
+          );
+
+          console.log(
+            "[DIZIAQUA] FINAL IMAGE:",
             `${cropWidth} × ${cropHeight}`
+          );
+
+          console.log(
+            "[DIZIAQUA] DIGITAL ZOOM:",
+            "NONE"
+          );
+
+          console.log(
+            "[DIZIAQUA] RESIZE TO UI:",
+            "NONE"
           );
 
           console.log(
@@ -727,11 +718,6 @@ export function useCamera() {
           console.log(
             "[DIZIAQUA] MEGAPIXELS:",
             megapixels.toFixed(2)
-          );
-
-          console.log(
-            "[DIZIAQUA] CROP OFFSET:",
-            `x=${cropX}, y=${cropY}`
           );
 
           console.log(
@@ -760,11 +746,11 @@ export function useCamera() {
           return null;
         }
       },
-      []
+      [getPreviewCrop]
     );
 
   // ==========================================================
-  // CAPTURE FRAME
+  // CAPTURE
   // ==========================================================
 
   const captureFrame =
@@ -781,6 +767,10 @@ export function useCamera() {
           !stream ||
           !cameraReady
         ) {
+          console.error(
+            "[DIZIAQUA] Camera is not ready."
+          );
+
           return null;
         }
 
@@ -793,9 +783,9 @@ export function useCamera() {
 
         try {
 
-          // ==================================================
-          // TORCH ON
-          // ==================================================
+          // --------------------------------------------------
+          // TORCH
+          // --------------------------------------------------
 
           await setCameraTorch(
             true
@@ -867,8 +857,7 @@ export function useCamera() {
 
                   const processed =
                     await processStillPhoto(
-                      photo,
-                      "ImageCapture"
+                      photo
                     );
 
                   if (
@@ -893,7 +882,7 @@ export function useCamera() {
             } catch (error) {
 
               console.warn(
-                "[DIZIAQUA] ImageCapture failed. Falling back to video.",
+                "[DIZIAQUA] ImageCapture failed. Using video fallback.",
                 error
               );
             }
@@ -901,25 +890,20 @@ export function useCamera() {
 
           // ==================================================
           // VIDEO FALLBACK
+          //
+          // Capture EXACT preview area.
           // ==================================================
-
-          console.log(
-            "[DIZIAQUA] USING VIDEO/CANVAS FALLBACK"
-          );
 
           const video =
             videoRef.current;
 
-          const canvas =
-            canvasRef.current;
+          if (!video) {
+            return null;
+          }
 
           if (
-            !video ||
-            !canvas ||
-            video.readyState <
-              HTMLMediaElement.HAVE_CURRENT_DATA ||
-            video.videoWidth === 0 ||
-            video.videoHeight === 0
+            video.videoWidth <= 0 ||
+            video.videoHeight <= 0
           ) {
             return null;
           }
@@ -930,57 +914,31 @@ export function useCamera() {
           const sourceHeight =
             video.videoHeight;
 
-          // ==================================================
-          // SAME SQUARE VIEWFINDER
-          // ==================================================
-
-          const squareSize =
-            Math.min(
+          const {
+            sourceX,
+            sourceY,
+            cropWidth,
+            cropHeight,
+          } =
+            getPreviewCrop(
               sourceWidth,
               sourceHeight
             );
 
-          // ==================================================
-          // SAME PREVIEW ZOOM
-          // ==================================================
+          // --------------------------------------------------
+          // FULL RESOLUTION CROP
+          // --------------------------------------------------
 
-          const targetWidth =
-            Math.round(
-              squareSize /
-              PREVIEW_ZOOM
+          const canvas =
+            document.createElement(
+              "canvas"
             );
-
-          const targetHeight =
-            Math.round(
-              squareSize /
-              PREVIEW_ZOOM
-            );
-
-          const cropX =
-            Math.round(
-              (
-                sourceWidth -
-                targetWidth
-              ) / 2
-            );
-
-          const cropY =
-            Math.round(
-              (
-                sourceHeight -
-                targetHeight
-              ) / 2
-            );
-
-          // ==================================================
-          // CANVAS
-          // ==================================================
 
           canvas.width =
-            targetWidth;
+            cropWidth;
 
           canvas.height =
-            targetHeight;
+            cropHeight;
 
           const ctx =
             canvas.getContext(
@@ -997,39 +955,27 @@ export function useCamera() {
           ctx.imageSmoothingQuality =
             "high";
 
-          ctx.clearRect(
-            0,
-            0,
-            targetWidth,
-            targetHeight
-          );
-
-          // ==================================================
-          // DRAW SAME FRAMING
-          // ==================================================
-
           ctx.drawImage(
             video,
 
-            cropX,
-            cropY,
-            targetWidth,
-            targetHeight,
+            sourceX,
+            sourceY,
+            cropWidth,
+            cropHeight,
 
             0,
             0,
-            targetWidth,
-            targetHeight
+            cropWidth,
+            cropHeight
           );
 
-          // ==================================================
-          // JPEG 0.98
-          // ==================================================
+          // --------------------------------------------------
+          // JPEG
+          // --------------------------------------------------
 
           const blob =
             await new Promise<Blob | null>(
               (resolve) => {
-
                 canvas.toBlob(
                   (result) => {
                     resolve(result);
@@ -1046,19 +992,18 @@ export function useCamera() {
 
           const megapixels =
             (
-              targetWidth *
-              targetHeight
+              cropWidth *
+              cropHeight
             ) /
             1_000_000;
 
           const resolution:
             CaptureResolution = {
-
             width:
-              targetWidth,
+              cropWidth,
 
             height:
-              targetHeight,
+              cropHeight,
 
             megapixels,
 
@@ -1066,7 +1011,6 @@ export function useCamera() {
               "Video fallback",
 
             sourceWidth,
-
             sourceHeight,
           };
 
@@ -1079,18 +1023,23 @@ export function useCamera() {
           );
 
           console.log(
-            "[DIZIAQUA] FALLBACK SOURCE:",
+            "[DIZIAQUA] VIDEO SOURCE:",
             `${sourceWidth} × ${sourceHeight}`
           );
 
           console.log(
-            "[DIZIAQUA] PREVIEW ZOOM:",
-            `${PREVIEW_ZOOM.toFixed(2)}x`
+            "[DIZIAQUA] EXACT PREVIEW CROP:",
+            `${cropWidth} × ${cropHeight}`
           );
 
           console.log(
-            "[DIZIAQUA] FINAL CAPTURE:",
-            `${targetWidth} × ${targetHeight}`
+            "[DIZIAQUA] CROP OFFSET:",
+            `x=${sourceX}, y=${sourceY}`
+          );
+
+          console.log(
+            "[DIZIAQUA] DIGITAL ZOOM:",
+            "NONE"
           );
 
           console.log(
@@ -1114,7 +1063,7 @@ export function useCamera() {
         } catch (error) {
 
           console.error(
-            "[DIZIAQUA] Image capture failed:",
+            "[DIZIAQUA] Capture failed:",
             error
           );
 
@@ -1129,6 +1078,7 @@ export function useCamera() {
       },
       [
         cameraReady,
+        getPreviewCrop,
         processStillPhoto,
         setCameraTorch,
       ]
