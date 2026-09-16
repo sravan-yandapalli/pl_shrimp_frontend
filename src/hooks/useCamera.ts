@@ -16,7 +16,6 @@ export interface CaptureResolution {
   height: number;
   megapixels: number;
   method:
-    | "ImageCapture"
     | "Video fallback";
   sourceWidth?: number;
   sourceHeight?: number;
@@ -520,236 +519,6 @@ export function useCamera() {
     );
 
   // ==========================================================
-  // PROCESS IMAGECAPTURE PHOTO
-  //
-  // IMPORTANT:
-  // Preserve the exact preview area at FULL resolution.
-  // ==========================================================
-
-  const processStillPhoto =
-    useCallback(
-      async (
-        photoBlob: Blob
-      ): Promise<{
-        blob: Blob;
-        url: string;
-        resolution: CaptureResolution;
-      } | null> => {
-
-        try {
-          const bitmap =
-            await createImageBitmap(
-              photoBlob
-            );
-
-          const sourceWidth =
-            bitmap.width;
-
-          const sourceHeight =
-            bitmap.height;
-
-          if (
-            sourceWidth <= 0 ||
-            sourceHeight <= 0
-          ) {
-            bitmap.close();
-            return null;
-          }
-
-          // --------------------------------------------------
-          // SAME CROP AS 300x300 PREVIEW
-          // --------------------------------------------------
-
-          const {
-            sourceX,
-            sourceY,
-            cropWidth,
-            cropHeight,
-          } =
-            getPreviewCrop(
-              sourceWidth,
-              sourceHeight
-            );
-
-          // --------------------------------------------------
-          // CREATE CANVAS AT ORIGINAL CROP SIZE
-          //
-          // NOT 300x300.
-          // --------------------------------------------------
-
-          const canvas =
-            document.createElement(
-              "canvas"
-            );
-
-          canvas.width =
-            cropWidth;
-
-          canvas.height =
-            cropHeight;
-
-          const ctx =
-            canvas.getContext(
-              "2d"
-            );
-
-          if (!ctx) {
-            bitmap.close();
-            return null;
-          }
-
-          ctx.imageSmoothingEnabled =
-            true;
-
-          ctx.imageSmoothingQuality =
-            "high";
-
-          ctx.clearRect(
-            0,
-            0,
-            cropWidth,
-            cropHeight
-          );
-
-          // --------------------------------------------------
-          // COPY EXACT PREVIEW AREA
-          // --------------------------------------------------
-
-          ctx.drawImage(
-            bitmap,
-
-            sourceX,
-            sourceY,
-            cropWidth,
-            cropHeight,
-
-            0,
-            0,
-            cropWidth,
-            cropHeight
-          );
-
-          bitmap.close();
-
-          // --------------------------------------------------
-          // HIGH-QUALITY JPEG
-          // --------------------------------------------------
-
-          const finalBlob =
-            await new Promise<Blob | null>(
-              (resolve) => {
-                canvas.toBlob(
-                  (blob) => {
-                    resolve(blob);
-                  },
-                  "image/jpeg",
-                  JPEG_QUALITY
-                );
-              }
-            );
-
-          if (!finalBlob) {
-            return null;
-          }
-
-          const megapixels =
-            (
-              cropWidth *
-              cropHeight
-            ) /
-            1_000_000;
-
-          const resolution:
-            CaptureResolution = {
-            width:
-              cropWidth,
-
-            height:
-              cropHeight,
-
-            megapixels,
-
-            method:
-              "ImageCapture",
-
-            sourceWidth,
-            sourceHeight,
-          };
-
-          console.log(
-            "========================================"
-          );
-
-          console.log(
-            "[DIZIAQUA] STILL PHOTO:",
-            `${sourceWidth} × ${sourceHeight}`
-          );
-
-          console.log(
-            "[DIZIAQUA] EXACT PREVIEW CROP:",
-            `${cropWidth} × ${cropHeight}`
-          );
-
-          console.log(
-            "[DIZIAQUA] CROP OFFSET:",
-            `x=${sourceX}, y=${sourceY}`
-          );
-
-          console.log(
-            "[DIZIAQUA] FINAL IMAGE:",
-            `${cropWidth} × ${cropHeight}`
-          );
-
-          console.log(
-            "[DIZIAQUA] DIGITAL ZOOM:",
-            "NONE"
-          );
-
-          console.log(
-            "[DIZIAQUA] RESIZE TO UI:",
-            "NONE"
-          );
-
-          console.log(
-            "[DIZIAQUA] JPEG QUALITY:",
-            JPEG_QUALITY
-          );
-
-          console.log(
-            "[DIZIAQUA] MEGAPIXELS:",
-            megapixels.toFixed(2)
-          );
-
-          console.log(
-            "========================================"
-          );
-
-          return {
-            blob:
-              finalBlob,
-
-            url:
-              URL.createObjectURL(
-                finalBlob
-              ),
-
-            resolution,
-          };
-
-        } catch (error) {
-
-          console.error(
-            "[DIZIAQUA] Still photo processing failed:",
-            error
-          );
-
-          return null;
-        }
-      },
-      [getPreviewCrop]
-    );
-
-  // ==========================================================
   // CAPTURE
   // ==========================================================
 
@@ -801,95 +570,23 @@ export function useCamera() {
           );
 
           // ==================================================
-          // IMAGECAPTURE
+          // CAPTURE FROM THE LIVE VIDEO FRAME
+          // ==================================================
+          //
+          // IMPORTANT:
+          // Do NOT use ImageCapture.takePhoto() here. On some Android
+          // devices (including some Redmi/Xiaomi models), the still
+          // camera can use a different field-of-view/aspect ratio than
+          // the live preview. That makes the captured image look
+          // zoomed out compared with what was visible in the circle.
+          //
+          // Capturing directly from the live <video> guarantees that
+          // the final image uses the exact same camera frame shown in
+          // the viewfinder.
           // ==================================================
 
-          if (
-            "ImageCapture" in
-            window
-          ) {
-
-            try {
-
-              const ImageCaptureClass =
-                window.ImageCapture;
-
-              if (
-                ImageCaptureClass
-              ) {
-
-                const imageCapture =
-                  new ImageCaptureClass(
-                    track
-                  );
-
-                const capabilities =
-                  await imageCapture
-                    .getPhotoCapabilities();
-
-                const maxWidth =
-                  capabilities
-                    .imageWidth?.max;
-
-                const maxHeight =
-                  capabilities
-                    .imageHeight?.max;
-
-                console.log(
-                  "[DIZIAQUA] MAX STILL:",
-                  `${maxWidth} × ${maxHeight}`
-                );
-
-                if (
-                  maxWidth &&
-                  maxHeight
-                ) {
-
-                  const photo =
-                    await imageCapture
-                      .takePhoto({
-                        imageWidth:
-                          maxWidth,
-
-                        imageHeight:
-                          maxHeight,
-                      });
-
-                  const processed =
-                    await processStillPhoto(
-                      photo
-                    );
-
-                  if (
-                    processed
-                  ) {
-
-                    setCaptureResolution(
-                      processed.resolution
-                    );
-
-                    return {
-                      blob:
-                        processed.blob,
-
-                      url:
-                        processed.url,
-                    };
-                  }
-                }
-              }
-
-            } catch (error) {
-
-              console.warn(
-                "[DIZIAQUA] ImageCapture failed. Using video fallback.",
-                error
-              );
-            }
-          }
-
           // ==================================================
-          // VIDEO FALLBACK
+          // LIVE VIDEO CAPTURE
           //
           // Capture EXACT preview area.
           // ==================================================
@@ -1079,7 +776,6 @@ export function useCamera() {
       [
         cameraReady,
         getPreviewCrop,
-        processStillPhoto,
         setCameraTorch,
       ]
     );

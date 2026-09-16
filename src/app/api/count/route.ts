@@ -20,21 +20,26 @@ export const maxDuration = 60;
 
 // ============================================================
 // CONFIGURATION
+// Supports BOTH local and deployed environment variables
 // ============================================================
 
 const REGION =
   process.env.DIZIAQUA_REGION ||
+  process.env.NEXT_PUBLIC_DIZIAQUA_REGION ||
   "ap-south-1";
 
 const S3_BUCKET =
+  process.env.DIZIAQUA_S3_BUCKET ||
   process.env.NEXT_PUBLIC_DIZIAQUA_S3_BUCKET ||
   "diziaqua-images-320698389233";
 
 const ACCESS_KEY_ID =
+  process.env.DIZIAQUA_ACCESS_KEY_ID ||
   process.env.NEXT_PUBLIC_DIZIAQUA_ACCESS_KEY_ID ||
   "";
 
 const SECRET_ACCESS_KEY =
+  process.env.DIZIAQUA_SECRET_ACCESS_KEY ||
   process.env.NEXT_PUBLIC_DIZIAQUA_SECRET_ACCESS_KEY ||
   "";
 
@@ -43,32 +48,27 @@ const ENDPOINT_NAME =
   "shrimp-yolo-v2-prod";
 
 // ============================================================
-// AWS CLIENTS
+// AWS CREDENTIALS
 // ============================================================
 
 const credentials = {
-  accessKeyId:
-    ACCESS_KEY_ID,
-
-  secretAccessKey:
-    SECRET_ACCESS_KEY,
+  accessKeyId: ACCESS_KEY_ID,
+  secretAccessKey: SECRET_ACCESS_KEY,
 };
 
-const smClient =
-  new SageMakerRuntimeClient({
-    region:
-      REGION,
+// ============================================================
+// AWS CLIENTS
+// ============================================================
 
-    credentials,
-  });
+const smClient = new SageMakerRuntimeClient({
+  region: REGION,
+  credentials,
+});
 
-const s3Client =
-  new S3Client({
-    region:
-      REGION,
-
-    credentials,
-  });
+const s3Client = new S3Client({
+  region: REGION,
+  credentials,
+});
 
 // ============================================================
 // TYPES
@@ -83,7 +83,7 @@ interface Prediction {
     number,
     number,
     number,
-    number,
+    number
   ];
 
   [key: string]: unknown;
@@ -111,18 +111,15 @@ interface SageMakerResult {
 
 async function createAnnotatedImageUrl(
   bucket: string,
-  s3Url: string,
+  s3Url: string
 ): Promise<string> {
   let url: URL;
 
   try {
-    url =
-      new URL(
-        s3Url,
-      );
+    url = new URL(s3Url);
   } catch {
     throw new Error(
-      "Invalid annotated image URL returned by SageMaker.",
+      "Invalid annotated image URL returned by SageMaker."
     );
   }
 
@@ -132,43 +129,34 @@ async function createAnnotatedImageUrl(
 
   const annotatedKey =
     decodeURIComponent(
-      url.pathname.replace(
-        /^\/+/,
-        "",
-      ),
+      url.pathname.replace(/^\/+/, "")
     );
 
   if (!annotatedKey) {
     throw new Error(
-      "Annotated image key is empty.",
+      "Annotated image key is empty."
     );
   }
 
   console.log(
     "[DIZIAQUA] Annotated image key:",
-    annotatedKey,
+    annotatedKey
   );
 
   // ----------------------------------------------------------
-  // PRESIGNED GET URL
+  // CREATE PRESIGNED GET URL
   // ----------------------------------------------------------
 
-  const signedUrl =
-    await getSignedUrl(
-      s3Client,
-
-      new GetObjectCommand({
-        Bucket:
-          bucket,
-
-        Key:
-          annotatedKey,
-      }),
-
-      {
-        expiresIn: 3600,
-      },
-    );
+  const signedUrl = await getSignedUrl(
+    s3Client,
+    new GetObjectCommand({
+      Bucket: bucket,
+      Key: annotatedKey,
+    }),
+    {
+      expiresIn: 3600,
+    }
+  );
 
   return signedUrl;
 }
@@ -179,61 +167,47 @@ async function createAnnotatedImageUrl(
 
 async function invokeSageMaker(
   bucket: string,
-  key: string,
+  key: string
 ): Promise<SageMakerResult> {
   console.log(
     "[DIZIAQUA] Starting SageMaker inference:",
     {
-      region:
-        REGION,
-
-      endpoint:
-        ENDPOINT_NAME,
-
+      region: REGION,
+      endpoint: ENDPOINT_NAME,
       bucket,
-
       key,
-    },
+      credentialsAvailable:
+        !!ACCESS_KEY_ID &&
+        !!SECRET_ACCESS_KEY,
+    }
   );
 
   // ----------------------------------------------------------
   // PAYLOAD
   // ----------------------------------------------------------
 
-  const payload =
-    JSON.stringify({
-      bucket,
-
-      key,
-    });
+  const payload = JSON.stringify({
+    bucket,
+    key,
+  });
 
   console.log(
     "[DIZIAQUA] SageMaker payload:",
-    payload,
+    payload
   );
 
   // ----------------------------------------------------------
-  // INVOKE
+  // INVOKE SAGEMAKER
   // ----------------------------------------------------------
 
-  const response =
-    await smClient.send(
-      new InvokeEndpointCommand({
-        EndpointName:
-          ENDPOINT_NAME,
-
-        ContentType:
-          "application/json",
-
-        Accept:
-          "application/json",
-
-        Body:
-          Buffer.from(
-            payload,
-          ),
-      }),
-    );
+  const response = await smClient.send(
+    new InvokeEndpointCommand({
+      EndpointName: ENDPOINT_NAME,
+      ContentType: "application/json",
+      Accept: "application/json",
+      Body: Buffer.from(payload),
+    })
+  );
 
   // ----------------------------------------------------------
   // RESPONSE BODY
@@ -241,40 +215,33 @@ async function invokeSageMaker(
 
   if (!response.Body) {
     throw new Error(
-      "SageMaker returned an empty response.",
+      "SageMaker returned an empty response."
     );
   }
 
-  const responseText =
-    Buffer
-      .from(
-        response.Body,
-      )
-      .toString(
-        "utf-8",
-      );
+  const responseText = Buffer.from(
+    response.Body
+  ).toString("utf-8");
 
   console.log(
     "[DIZIAQUA] SageMaker response:",
-    responseText,
+    responseText
   );
 
   // ----------------------------------------------------------
   // PARSE JSON
   // ----------------------------------------------------------
 
-  let result:
-    SageMakerResult;
+  let result: SageMakerResult;
 
   try {
-    result =
-      JSON.parse(
-        responseText,
-      ) as SageMakerResult;
+    result = JSON.parse(
+      responseText
+    ) as SageMakerResult;
   } catch {
     throw new Error(
       "SageMaker returned invalid JSON: " +
-        responseText,
+        responseText
     );
   }
 
@@ -284,7 +251,7 @@ async function invokeSageMaker(
 
   if (result.error) {
     throw new Error(
-      result.error,
+      result.error
     );
   }
 
@@ -296,38 +263,74 @@ async function invokeSageMaker(
 // ============================================================
 
 export async function POST(
-  request: Request,
+  request: Request
 ) {
-  const start =
-    Date.now();
+  const start = Date.now();
 
   try {
     console.log(
-      "[DIZIAQUA] ========================================",
+      "[DIZIAQUA] ========================================"
     );
 
     console.log(
-      "[DIZIAQUA] New count request",
+      "[DIZIAQUA] New count request"
     );
 
     // --------------------------------------------------------
-    // CHECK CREDENTIALS
+    // CHECK AWS CREDENTIALS
     // --------------------------------------------------------
 
     if (
       !ACCESS_KEY_ID ||
       !SECRET_ACCESS_KEY
     ) {
+      console.error(
+        "[DIZIAQUA] AWS credentials are missing."
+      );
+
       return NextResponse.json(
         {
           success: false,
-
           message:
-            "DIZIAQUA AWS credentials are missing from .env.local.",
+            "DIZIAQUA AWS credentials are missing from environment variables.",
         },
         {
           status: 500,
+        }
+      );
+    }
+
+    // --------------------------------------------------------
+    // CHECK REGION
+    // --------------------------------------------------------
+
+    if (!REGION) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "DIZIAQUA AWS region is missing.",
         },
+        {
+          status: 500,
+        }
+      );
+    }
+
+    // --------------------------------------------------------
+    // CHECK S3 BUCKET
+    // --------------------------------------------------------
+
+    if (!S3_BUCKET) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "DIZIAQUA S3 bucket is missing.",
+        },
+        {
+          status: 500,
+        }
       );
     }
 
@@ -335,25 +338,30 @@ export async function POST(
     // READ REQUEST
     // --------------------------------------------------------
 
-    const body =
-      await request.json();
+    const body = await request.json();
+
+    // --------------------------------------------------------
+    // BUCKET
+    // --------------------------------------------------------
 
     const bucket =
-      typeof body.bucket ===
-        "string" &&
+      typeof body?.bucket === "string" &&
       body.bucket.length > 0
         ? body.bucket
         : S3_BUCKET;
 
-    const key =
-      body.key;
+    // --------------------------------------------------------
+    // IMAGE KEY
+    // --------------------------------------------------------
+
+    const key = body?.key;
 
     console.log(
       "[DIZIAQUA] Count request:",
       {
         bucket,
         key,
-      },
+      }
     );
 
     // --------------------------------------------------------
@@ -361,35 +369,32 @@ export async function POST(
     // --------------------------------------------------------
 
     if (
-      typeof key !==
-        "string" ||
+      typeof key !== "string" ||
       key.length === 0
     ) {
       return NextResponse.json(
         {
           success: false,
-
-          message:
-            "Missing image key.",
+          message: "Missing image key.",
         },
         {
           status: 400,
-        },
+        }
       );
     }
 
     // --------------------------------------------------------
-    // SAGEMAKER
+    // SAGEMAKER INFERENCE
     // --------------------------------------------------------
 
     const result =
       await invokeSageMaker(
         bucket,
-        key,
+        key
       );
 
     // --------------------------------------------------------
-    // COUNT
+    // SHRIMP COUNT
     // --------------------------------------------------------
 
     const count =
@@ -400,7 +405,7 @@ export async function POST(
 
     console.log(
       "[DIZIAQUA] Shrimp count:",
-      count,
+      count
     );
 
     // --------------------------------------------------------
@@ -408,20 +413,17 @@ export async function POST(
     // --------------------------------------------------------
 
     let annotatedImageUrl:
-      string | null =
-        null;
+      string | null = null;
 
     if (
       typeof result.annotated_image_url ===
         "string" &&
-      result.annotated_image_url.length >
-        0
+      result.annotated_image_url.length > 0
     ) {
       annotatedImageUrl =
         await createAnnotatedImageUrl(
           bucket,
-
-          result.annotated_image_url,
+          result.annotated_image_url
         );
     }
 
@@ -430,11 +432,10 @@ export async function POST(
     // --------------------------------------------------------
 
     const processingTimeMs =
-      Date.now() -
-      start;
+      Date.now() - start;
 
     // --------------------------------------------------------
-    // RESPONSE
+    // FINAL RESPONSE
     // --------------------------------------------------------
 
     const responseData = {
@@ -442,11 +443,9 @@ export async function POST(
 
       count,
 
-      shrimp_count:
-        count,
+      shrimp_count: count,
 
-      fileName:
-        key,
+      fileName: key,
 
       annotatedImageUrl,
 
@@ -454,12 +453,10 @@ export async function POST(
         annotatedImageUrl,
 
       results:
-        result.predictions ||
-        [],
+        result.predictions || [],
 
       predictions:
-        result.predictions ||
-        [],
+        result.predictions || [],
 
       processingTimeMs,
 
@@ -469,6 +466,10 @@ export async function POST(
 
       endpoint:
         ENDPOINT_NAME,
+
+      status:
+        result.status ||
+        "completed",
     };
 
     console.log(
@@ -480,8 +481,15 @@ export async function POST(
           !!annotatedImageUrl,
 
         processingTimeMs,
-      },
+
+        endpoint:
+          ENDPOINT_NAME,
+      }
     );
+
+    // --------------------------------------------------------
+    // RESPONSE
+    // --------------------------------------------------------
 
     return NextResponse.json(
       responseData,
@@ -492,26 +500,27 @@ export async function POST(
           "Cache-Control":
             "no-store",
         },
-      },
+      }
     );
   } catch (error) {
     const processingTimeMs =
-      Date.now() -
-      start;
+      Date.now() - start;
 
     console.error(
       "[DIZIAQUA] Count request failed:",
-      error,
+      error
     );
+
+    const message =
+      error instanceof Error
+        ? error.message
+        : String(error);
 
     return NextResponse.json(
       {
         success: false,
 
-        message:
-          error instanceof Error
-            ? error.message
-            : String(error),
+        message,
 
         processingTimeMs,
       },
@@ -522,7 +531,7 @@ export async function POST(
           "Cache-Control":
             "no-store",
         },
-      },
+      }
     );
   }
 }

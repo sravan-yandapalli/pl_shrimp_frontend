@@ -16,34 +16,36 @@ export const dynamic = "force-dynamic";
 
 // ============================================================
 // AWS CONFIGURATION
+// Supports BOTH local and deployed environment variables
 // ============================================================
 
 const REGION =
+  process.env.DIZIAQUA_REGION ||
   process.env.NEXT_PUBLIC_DIZIAQUA_REGION ||
   "ap-south-1";
 
 const S3_BUCKET =
+  process.env.DIZIAQUA_S3_BUCKET ||
   process.env.NEXT_PUBLIC_DIZIAQUA_S3_BUCKET ||
   "diziaqua-images-320698389233";
 
 const ACCESS_KEY_ID =
+  process.env.DIZIAQUA_ACCESS_KEY_ID ||
   process.env.NEXT_PUBLIC_DIZIAQUA_ACCESS_KEY_ID ||
   "";
 
 const SECRET_ACCESS_KEY =
+  process.env.DIZIAQUA_SECRET_ACCESS_KEY ||
   process.env.NEXT_PUBLIC_DIZIAQUA_SECRET_ACCESS_KEY ||
   "";
 
 // ============================================================
-// VALIDATE CREDENTIALS
+// STARTUP VALIDATION
 // ============================================================
 
-if (
-  !ACCESS_KEY_ID ||
-  !SECRET_ACCESS_KEY
-) {
+if (!ACCESS_KEY_ID || !SECRET_ACCESS_KEY) {
   console.warn(
-    "[DIZIAQUA] AWS credentials are missing from .env.local",
+    "[DIZIAQUA] AWS credentials are missing."
   );
 }
 
@@ -51,40 +53,32 @@ if (
 // S3 CLIENT
 // ============================================================
 
-const s3Client =
-  new S3Client({
-    region: REGION,
+const s3Client = new S3Client({
+  region: REGION,
 
-    credentials: {
-      accessKeyId:
-        ACCESS_KEY_ID,
+  credentials: {
+    accessKeyId: ACCESS_KEY_ID,
+    secretAccessKey: SECRET_ACCESS_KEY,
+  },
 
-      secretAccessKey:
-        SECRET_ACCESS_KEY,
-    },
-
-    requestChecksumCalculation:
-      "WHEN_REQUIRED",
-  });
+  requestChecksumCalculation: "WHEN_REQUIRED",
+});
 
 // ============================================================
 // ALLOWED IMAGE TYPES
 // ============================================================
 
-const ALLOWED_CONTENT_TYPES =
-  new Set([
-    "image/jpeg",
-    "image/png",
-    "image/webp",
-  ]);
+const ALLOWED_CONTENT_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+]);
 
 // ============================================================
 // FILE EXTENSION
 // ============================================================
 
-function getExtension(
-  contentType: string,
-) {
+function getExtension(contentType: string): string {
   switch (contentType) {
     case "image/png":
       return "png";
@@ -102,112 +96,96 @@ function getExtension(
 // POST
 // ============================================================
 
-export async function POST(
-  request: Request,
-) {
+export async function POST(request: Request) {
   try {
+    console.log(
+      "[DIZIAQUA] Requesting S3 upload URL..."
+    );
+
     // --------------------------------------------------------
     // CHECK CREDENTIALS
     // --------------------------------------------------------
 
-    if (
-      !ACCESS_KEY_ID ||
-      !SECRET_ACCESS_KEY
-    ) {
+    if (!ACCESS_KEY_ID || !SECRET_ACCESS_KEY) {
       return NextResponse.json(
         {
           success: false,
-
           message:
-            "AWS credentials are missing from .env.local.",
+            "AWS credentials are missing from environment variables.",
         },
         {
           status: 500,
-        },
+        }
       );
     }
 
     // --------------------------------------------------------
-    // DEFAULT CONTENT TYPE
+    // CHECK BUCKET
     // --------------------------------------------------------
 
-    let contentType =
-      "image/jpeg";
+    if (!S3_BUCKET) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "DIZIAQUA S3 bucket is missing.",
+        },
+        {
+          status: 500,
+        }
+      );
+    }
 
     // --------------------------------------------------------
     // READ REQUEST
     // --------------------------------------------------------
 
+    let contentType = "image/jpeg";
+
     try {
-      const body =
-        await request.json();
+      const body = await request.json();
 
       if (
         body &&
-        typeof body.contentType ===
-          "string" &&
-        ALLOWED_CONTENT_TYPES.has(
-          body.contentType,
-        )
+        typeof body.contentType === "string" &&
+        ALLOWED_CONTENT_TYPES.has(body.contentType)
       ) {
-        contentType =
-          body.contentType;
+        contentType = body.contentType;
       }
     } catch {
-      // Default to JPEG.
+      // If body is empty or invalid JSON,
+      // continue with image/jpeg.
     }
 
     // --------------------------------------------------------
     // DATE
     // --------------------------------------------------------
 
-    const now =
-      new Date();
+    const now = new Date();
 
-    const year =
-      String(
-        now.getFullYear(),
-      );
+    const year = String(
+      now.getFullYear()
+    );
 
-    const month =
-      String(
-        now.getMonth() + 1,
-      ).padStart(
-        2,
-        "0",
-      );
+    const month = String(
+      now.getMonth() + 1
+    ).padStart(2, "0");
 
-    const day =
-      String(
-        now.getDate(),
-      ).padStart(
-        2,
-        "0",
-      );
+    const day = String(
+      now.getDate()
+    ).padStart(2, "0");
 
-    const hours =
-      String(
-        now.getHours(),
-      ).padStart(
-        2,
-        "0",
-      );
+    const hours = String(
+      now.getHours()
+    ).padStart(2, "0");
 
-    const minutes =
-      String(
-        now.getMinutes(),
-      ).padStart(
-        2,
-        "0",
-      );
+    const minutes = String(
+      now.getMinutes()
+    ).padStart(2, "0");
 
-    const seconds =
-      String(
-        now.getSeconds(),
-      ).padStart(
-        2,
-        "0",
-      );
+    const seconds = String(
+      now.getSeconds()
+    ).padStart(2, "0");
 
     const timestamp =
       `${year}${month}${day}_${hours}${minutes}${seconds}`;
@@ -216,19 +194,16 @@ export async function POST(
     // RANDOM ID
     // --------------------------------------------------------
 
-    const randomId =
-      crypto
-        .randomBytes(4)
-        .toString("hex");
+    const randomId = crypto
+      .randomBytes(4)
+      .toString("hex");
 
     // --------------------------------------------------------
     // EXTENSION
     // --------------------------------------------------------
 
     const extension =
-      getExtension(
-        contentType,
-      );
+      getExtension(contentType);
 
     // --------------------------------------------------------
     // S3 KEY
@@ -241,31 +216,23 @@ export async function POST(
     // S3 COMMAND
     // --------------------------------------------------------
 
-    const command =
-      new PutObjectCommand({
-        Bucket:
-          S3_BUCKET,
-
-        Key:
-          key,
-
-        ContentType:
-          contentType,
-      });
+    const command = new PutObjectCommand({
+      Bucket: S3_BUCKET,
+      Key: key,
+      ContentType: contentType,
+    });
 
     // --------------------------------------------------------
-    // PRESIGNED URL
+    // CREATE PRE-SIGNED URL
     // --------------------------------------------------------
 
     const uploadUrl =
       await getSignedUrl(
         s3Client,
-
         command,
-
         {
           expiresIn: 300,
-        },
+        }
       );
 
     // --------------------------------------------------------
@@ -275,13 +242,10 @@ export async function POST(
     console.log(
       "[DIZIAQUA] Generated upload URL:",
       {
-        bucket:
-          S3_BUCKET,
-
+        bucket: S3_BUCKET,
         key,
-
         contentType,
-      },
+      }
     );
 
     // --------------------------------------------------------
@@ -291,43 +255,35 @@ export async function POST(
     return NextResponse.json(
       {
         success: true,
-
         uploadUrl,
-
         key,
-
-        bucket:
-          S3_BUCKET,
-
+        bucket: S3_BUCKET,
         contentType,
       },
       {
         status: 200,
-
         headers: {
-          "Cache-Control":
-            "no-store",
+          "Cache-Control": "no-store",
         },
-      },
+      }
     );
   } catch (error) {
     console.error(
       "[DIZIAQUA] Error generating pre-signed URL:",
-      error,
+      error
     );
 
     return NextResponse.json(
       {
         success: false,
-
         message:
           error instanceof Error
             ? error.message
-            : "Failed to generate upload URL",
+            : "Failed to generate upload URL.",
       },
       {
         status: 500,
-      },
+      }
     );
   }
 }

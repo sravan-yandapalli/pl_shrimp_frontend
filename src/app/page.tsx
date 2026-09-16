@@ -84,13 +84,29 @@ export default function Home() {
     );
 
   // ============================================================
-  // WARM UP SAGEMAKER
+  // WARM UP SAGEMAKER ONCE
   // ============================================================
 
+  const warmUpStartedRef =
+    useRef(false);
+
   useEffect(() => {
+    // React Strict Mode can run effects twice in development.
+    // This guard ensures only one warm-up request is started
+    // for this page mount.
+    if (warmUpStartedRef.current) {
+      return;
+    }
+
+    warmUpStartedRef.current = true;
+
     const warmUpEndpoint =
       async () => {
         try {
+          console.log(
+            "[DIZIAQUA] Calling SageMaker warm-up...",
+          );
+
           const response =
             await fetch(
               "/api/warmup",
@@ -100,21 +116,30 @@ export default function Home() {
               },
             );
 
+          console.log(
+            "[DIZIAQUA] SageMaker warm-up returned:",
+            response.status,
+          );
+
           if (!response.ok) {
             console.warn(
-              "[DIZIAQUA] SageMaker warm-up returned:",
+              "[DIZIAQUA] SageMaker warm-up failed:",
               response.status,
             );
 
             return;
           }
 
+          const data =
+            await response.json();
+
           console.log(
-            "[DIZIAQUA] SageMaker warm-up signal sent.",
+            "[DIZIAQUA] SageMaker warm-up completed:",
+            data,
           );
         } catch (error) {
           console.warn(
-            "[DIZIAQUA] Warm-up ping failed:",
+            "[DIZIAQUA] Warm-up request failed:",
             error,
           );
         }

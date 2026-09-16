@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-
 import {
   SageMakerRuntimeClient,
   InvokeEndpointCommand,
@@ -11,18 +10,22 @@ export const maxDuration = 60;
 
 // ============================================================
 // CONFIGURATION
+// Supports BOTH local and deployed environment variable names
 // ============================================================
 
 const REGION =
   process.env.DIZIAQUA_REGION ||
+  process.env.NEXT_PUBLIC_DIZIAQUA_REGION ||
   "ap-south-1";
 
 const ACCESS_KEY_ID =
   process.env.DIZIAQUA_ACCESS_KEY_ID ||
+  process.env.NEXT_PUBLIC_DIZIAQUA_ACCESS_KEY_ID ||
   "";
 
 const SECRET_ACCESS_KEY =
   process.env.DIZIAQUA_SECRET_ACCESS_KEY ||
+  process.env.NEXT_PUBLIC_DIZIAQUA_SECRET_ACCESS_KEY ||
   "";
 
 const ENDPOINT_NAME =
@@ -33,125 +36,90 @@ const ENDPOINT_NAME =
 // SAGEMAKER CLIENT
 // ============================================================
 
-const smClient =
-  new SageMakerRuntimeClient({
-    region: REGION,
-
-    credentials: {
-      accessKeyId:
-        ACCESS_KEY_ID,
-
-      secretAccessKey:
-        SECRET_ACCESS_KEY,
-    },
-  });
+const smClient = new SageMakerRuntimeClient({
+  region: REGION,
+  credentials: {
+    accessKeyId: ACCESS_KEY_ID,
+    secretAccessKey: SECRET_ACCESS_KEY,
+  },
+});
 
 // ============================================================
-// GET
+// GET /api/warmup
 // ============================================================
 
 export async function GET() {
-  const start =
-    Date.now();
+  const start = Date.now();
 
   try {
     console.log(
-      "[DIZIAQUA] Starting SageMaker warm-up...",
+      "[DIZIAQUA] Starting SageMaker warm-up..."
     );
 
     console.log(
       "[DIZIAQUA] SageMaker configuration:",
       {
-        region:
-          REGION,
-
-        endpoint:
-          ENDPOINT_NAME,
-      },
+        region: REGION,
+        endpoint: ENDPOINT_NAME,
+        hasAccessKey: Boolean(ACCESS_KEY_ID),
+        hasSecretKey: Boolean(SECRET_ACCESS_KEY),
+      }
     );
 
     // --------------------------------------------------------
     // VALIDATE CREDENTIALS
     // --------------------------------------------------------
 
-    if (
-      !ACCESS_KEY_ID ||
-      !SECRET_ACCESS_KEY
-    ) {
+    if (!ACCESS_KEY_ID || !SECRET_ACCESS_KEY) {
       throw new Error(
-        "DIZIAQUA AWS credentials are missing.",
+        "DIZIAQUA AWS credentials are missing."
       );
     }
 
     // --------------------------------------------------------
-    // WARMUP PAYLOAD
+    // WARM-UP PAYLOAD
     // --------------------------------------------------------
 
-    const payload =
-      JSON.stringify({
-        warmup: true,
-      });
+    const payload = JSON.stringify({
+      warmup: true,
+    });
 
     // --------------------------------------------------------
     // INVOKE SAGEMAKER
     // --------------------------------------------------------
 
-    const response =
-      await smClient.send(
-        new InvokeEndpointCommand({
-          EndpointName:
-            ENDPOINT_NAME,
-
-          ContentType:
-            "application/json",
-
-          Accept:
-            "application/json",
-
-          Body:
-            Buffer.from(
-              payload,
-            ),
-        }),
-      );
+    const response = await smClient.send(
+      new InvokeEndpointCommand({
+        EndpointName: ENDPOINT_NAME,
+        ContentType: "application/json",
+        Accept: "application/json",
+        Body: Buffer.from(payload),
+      })
+    );
 
     // --------------------------------------------------------
     // READ RESPONSE
     // --------------------------------------------------------
 
-    const responseText =
-      response.Body
-        ? Buffer
-            .from(
-              response.Body,
-            )
-            .toString(
-              "utf-8",
-            )
-        : "";
+    const responseText = response.Body
+      ? Buffer.from(response.Body).toString("utf-8")
+      : "";
 
     // --------------------------------------------------------
     // PARSE RESPONSE
     // --------------------------------------------------------
 
-    let result: unknown =
-      null;
+    let result: unknown = null;
 
     if (responseText) {
       try {
-        result =
-          JSON.parse(
-            responseText,
-          );
+        result = JSON.parse(responseText);
       } catch {
-        result =
-          responseText;
+        result = responseText;
       }
     }
 
-    const elapsed =
-      Date.now() -
-      start;
+    const elapsed = Date.now() - start;
 
     // --------------------------------------------------------
     // SUCCESS LOG
@@ -160,14 +128,10 @@ export async function GET() {
     console.log(
       "[DIZIAQUA] SageMaker warm-up completed",
       {
-        endpoint:
-          ENDPOINT_NAME,
-
-        elapsedMs:
-          elapsed,
-
+        endpoint: ENDPOINT_NAME,
+        elapsedMs: elapsed,
         result,
-      },
+      }
     );
 
     // --------------------------------------------------------
@@ -176,21 +140,13 @@ export async function GET() {
 
     return NextResponse.json({
       success: true,
-
       warm: true,
-
-      endpoint:
-        ENDPOINT_NAME,
-
-      processingTimeMs:
-        elapsed,
-
+      endpoint: ENDPOINT_NAME,
+      processingTimeMs: elapsed,
       result,
     });
   } catch (error) {
-    const elapsed =
-      Date.now() -
-      start;
+    const elapsed = Date.now() - start;
 
     const message =
       error instanceof Error
@@ -199,26 +155,20 @@ export async function GET() {
 
     console.error(
       "[DIZIAQUA] SageMaker warm-up failed:",
-      error,
+      error
     );
 
     return NextResponse.json(
       {
         success: false,
-
         warm: false,
-
-        endpoint:
-          ENDPOINT_NAME,
-
+        endpoint: ENDPOINT_NAME,
         message,
-
-        processingTimeMs:
-          elapsed,
+        processingTimeMs: elapsed,
       },
       {
         status: 500,
-      },
+      }
     );
   }
 }
