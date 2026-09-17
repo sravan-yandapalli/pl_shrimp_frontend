@@ -231,7 +231,7 @@ export async function POST(request: Request) {
         s3Client,
         command,
         {
-          expiresIn: 300,
+          expiresIn: 900,
         }
       );
 

@@ -1,0 +1,18 @@
+{
+  "batch_id": "B2_5K_100C",
+  "dataset_type": "LOAD_TEST_B2_5K_100C",
+  "start_time_utc": "2026-09-17T16:11:44.503972+00:00",
+  "end_time_utc": "2026-09-17T16:40:38.552676+00:00",
+  "total_images": 5000,
+  "successful_images": 4999,
+  "failed_images": 1,
+  "success_rate_percent": 99.98,
+  "users": 100,
+  "images_per_user": 50,
+  "max_workers": 100,
+  "failed_users": 1,
+  "elapsed_seconds": 1734.0487005710602,
+  "elapsed_minutes": 28.900811676184336,
+  "wall_clock_seconds_per_success": 0.3468791159373995,
+  "failure_log": "load_test_failures_B2_5K_100C.jsonl"
+}
